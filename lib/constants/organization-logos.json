@@ -1,0 +1,56 @@
+{
+  "organizations": {
+    "grasim": {
+      "logo": "/Grasim_logo_Aw-01.jpg",
+      "alt": "Grasim Logo"
+    },
+    "ultratech": {
+      "logo": "/Ultra Tech Cement.png",
+      "alt": "Ultra Tech Cement Logo"
+    },
+    "abg": {
+      "logo": "/ABG_Group_LOGO.jpg",
+      "alt": "Aditya Birla Group"
+    },
+    "aditya birla": {
+      "logo": "/aditya-birla-logo.png",
+      "alt": "Aditya Birla Logo"
+    },
+    "mp birla": {
+      "logo": "/mpbirla.png",
+      "alt": "MP Birla Logo"
+    },
+    "nuvoco": {
+      "logo": "/Nuvoco_logo.jpg",
+      "alt": "Nuvoco Logo"
+    },
+    "dalmia": {
+      "logo": "/dalmia.png",
+      "alt": "Dalmia Bharat Logo"
+    },
+    "jsl": {
+      "logo": "/jsl-logo.webp",
+      "alt": "JSL Logo"
+    },
+    "jindal": {
+      "logo": "/jsl-logo.webp",
+      "alt": "Jindal Logo"
+    },
+    "adani": {
+      "logo": "/Adani_2012_logo.png",
+      "alt": "Adani Group Logo"
+    },
+    "rain cement": {
+      "logo": "/rain-cement-logo.jpeg",
+      "alt": "Rain Cements Limited"
+    },
+    "hindalco": {
+      "logo": "/hindalco_logo.jpg",
+      "alt": "Hindalco Logo"
+    }
+  },
+  "default": {
+    "logo": "/Acme-Logo.png",
+    "alt": "Organization Logo"
+  }
+}

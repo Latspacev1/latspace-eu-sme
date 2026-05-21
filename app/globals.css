@@ -1,0 +1,466 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-ibm-plex-sans);
+  --font-mono: var(--font-ibm-plex-mono);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --color-ccts-primary: var(--ccts-primary);
+  --color-ccts-secondary: var(--ccts-secondary);
+  --color-ccts-accent: var(--ccts-accent);
+  --color-ccts-white: var(--ccts-white);
+  --color-ccts-black: var(--ccts-black);
+  --radius-sm: 0px;
+  --radius-md: 0px;
+  --radius-lg: 0px;
+  --radius-xl: 0px;
+  --spacing-4: 1rem;
+  --spacing-6: 1.5rem;
+  --spacing-8: 2rem;
+  --spacing-12: 3rem;
+  --spacing-16: 4rem;
+  --spacing-20: 5rem;
+  --spacing-24: 6rem;
+  --spacing-32: 8rem;
+  --spacing-40: 10rem;
+  --spacing-48: 12rem;
+  --grid-size: 8px;
+}
+
+:root {
+  /* CCTS Professional Design System - Lab-Grade Minimalism */
+  --radius: 0px;
+
+  /* Core Brand Colors - Disciplined Teal Palette */
+  --ccts-primary: #074D47;
+  /* Deep teal - Authority, trust, precision */
+  --ccts-secondary: #22867C;
+  /* Medium teal - Supporting actions */
+  --ccts-accent: #89E4DA;
+  /* Light teal - Minimal highlights only */
+  --ccts-white: #FFFFFF;
+  /* Pure white - Maximum contrast */
+  --ccts-black: #0A0A0A;
+  /* Deep charcoal - Text, serious tone */
+
+  /* Graph Paper Grid System */
+  --grid-size: 8px;
+  /* Base unit for all spacing */
+  --grid-color: rgba(7, 77, 71, 0.03);
+  /* Subtle teal grid lines */
+
+  /* Base Colors - White canvas with deep charcoal text */
+  --background: #FFFFFF;
+  --foreground: #0A0A0A;
+
+  /* Card Colors - Elevated white surfaces */
+  --card: #FFFFFF;
+  --card-foreground: #0A0A0A;
+
+  /* Popover Colors */
+  --popover: #FFFFFF;
+  --popover-foreground: #0A0A0A;
+
+  /* Primary Colors - Deep teal for primary actions */
+  --primary: #074D47;
+  --primary-foreground: #FFFFFF;
+
+  /* Secondary Colors - Medium teal for supporting elements */
+  --secondary: #22867C;
+  --secondary-foreground: #FFFFFF;
+
+  /* Muted Colors - Minimal gray for backgrounds */
+  --muted: #F8F9FA;
+  /* Barely-there gray */
+  --muted-foreground: #5A5A5A;
+  /* Mid-gray for secondary text */
+
+  /* Accent Colors - Light teal for strategic highlights */
+  --accent: #89E4DA;
+  --accent-foreground: #074D47;
+
+  /* Destructive/Error Colors - Red with restraint */
+  --destructive: #DC2626;
+  --destructive-foreground: #FFFFFF;
+
+  /* Border & Input Colors - Subtle definition */
+  --border: #E5E7EB;
+  /* Light gray borders */
+  --input: #FFFFFF;
+  /* White input backgrounds */
+  --ring: #074D47;
+  /* Deep teal focus ring */
+
+  /* Chart Colors - Restrained palette for data visualization */
+  --chart-1: #074D47;
+  /* Primary deep teal */
+  --chart-2: #22867C;
+  /* Secondary medium teal */
+  --chart-3: #89E4DA;
+  /* Accent light teal */
+  --chart-4: #0A5A52;
+  /* Darker teal variation */
+  --chart-5: #3FA396;
+  /* Mid-range teal */
+
+  /* Sidebar Colors - Clean, unobtrusive navigation */
+  --sidebar: #FFFFFF;
+  --sidebar-foreground: #0A0A0A;
+  --sidebar-primary: #074D47;
+  --sidebar-primary-foreground: #FFFFFF;
+  --sidebar-accent: #F8F9FA;
+  --sidebar-accent-foreground: #074D47;
+  --sidebar-border: #E5E7EB;
+  --sidebar-ring: #074D47;
+}
+
+.dark {
+  /* Dark Mode - Inverted minimalism with same restraint */
+  --background: #050505;
+  --foreground: #FFFFFF;
+
+  /* Graph Paper Grid System - Darker variant */
+  --grid-color: rgba(137, 228, 218, 0.02);
+  /* Even more subtle in dark mode */
+
+  /* Card Colors - Slightly elevated dark surfaces */
+  --card: #0F0F0F;
+  --card-foreground: #FFFFFF;
+
+  /* Popover Colors */
+  --popover: #0F0F0F;
+  --popover-foreground: #FFFFFF;
+
+  /* Primary Colors - Medium teal for better visibility on dark */
+  --primary: #22867C;
+  --primary-foreground: #FFFFFF;
+
+  /* Secondary Colors */
+  --secondary: #1A1A1A;
+  --secondary-foreground: #89E4DA;
+
+  /* Muted Colors */
+  --muted: #1A1A1A;
+  --muted-foreground: #A3A3A3;
+
+  /* Accent Colors */
+  --accent: #89E4DA;
+  --accent-foreground: #050505;
+
+  /* Destructive/Error Colors */
+  --destructive: #EF4444;
+  --destructive-foreground: #FFFFFF;
+
+  /* Border & Input Colors */
+  --border: rgba(255, 255, 255, 0.08);
+  --input: rgba(255, 255, 255, 0.05);
+  --ring: #22867C;
+
+  /* Chart Colors - Adjusted for dark mode visibility */
+  --chart-1: #22867C;
+  --chart-2: #89E4DA;
+  --chart-3: #3FA396;
+  --chart-4: #0A5A52;
+  --chart-5: #56B8AC;
+
+  /* Sidebar Colors */
+  --sidebar: #0F0F0F;
+  --sidebar-foreground: #FFFFFF;
+  --sidebar-primary: #22867C;
+  --sidebar-primary-foreground: #FFFFFF;
+  --sidebar-accent: #1A1A1A;
+  --sidebar-accent-foreground: #89E4DA;
+  --sidebar-border: rgba(255, 255, 255, 0.08);
+  --sidebar-ring: #22867C;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+
+  /* Text selection — visible on all backgrounds including dark teal */
+  ::selection {
+    background-color: rgba(7, 77, 71, 0.3);
+    color: #0A0A0A;
+  }
+
+  /* Body - Professional canvas */
+  body {
+    @apply text-foreground font-sans antialiased;
+    background-color: #FFFFFF;
+    font-size: 15px;
+    line-height: 1.65;
+    letter-spacing: -0.01em;
+    font-weight: 400;
+  }
+
+  /* Typography - Authority through restraint */
+  h1 {
+    @apply font-semibold text-4xl md:text-5xl;
+    line-height: 1.1;
+    letter-spacing: -0.02em;
+    font-weight: 600;
+    margin-bottom: 1.5rem;
+  }
+
+  h2 {
+    @apply font-semibold text-3xl md:text-4xl;
+    line-height: 1.15;
+    letter-spacing: -0.015em;
+    font-weight: 600;
+    margin-bottom: 1.25rem;
+  }
+
+  h3 {
+    @apply font-semibold text-2xl md:text-3xl;
+    line-height: 1.2;
+    letter-spacing: -0.01em;
+    font-weight: 600;
+    margin-bottom: 1rem;
+  }
+
+  h4 {
+    @apply font-semibold text-xl md:text-2xl;
+    line-height: 1.3;
+    letter-spacing: -0.008em;
+    font-weight: 600;
+    margin-bottom: 0.875rem;
+  }
+
+  h5 {
+    @apply font-semibold text-lg md:text-xl;
+    line-height: 1.4;
+    letter-spacing: -0.006em;
+    font-weight: 600;
+    margin-bottom: 0.75rem;
+  }
+
+  h6 {
+    @apply font-semibold text-base md:text-lg;
+    line-height: 1.45;
+    letter-spacing: -0.004em;
+    font-weight: 600;
+    margin-bottom: 0.625rem;
+  }
+
+  /* Paragraph spacing - generous for readability */
+  p {
+    margin-bottom: 1.25rem;
+    line-height: 1.65;
+  }
+
+  /* Text elements */
+  strong,
+  b {
+    font-weight: 600;
+  }
+
+  em,
+  i {
+    font-style: italic;
+  }
+
+  small {
+    font-size: 0.875em;
+    line-height: 1.6;
+  }
+
+  /* Code elements */
+  code {
+    @apply font-mono bg-muted px-1.5 py-0.5 text-sm;
+    border-radius: 0px;
+  }
+
+  pre {
+    @apply font-mono bg-muted p-4 overflow-x-auto text-sm;
+    border-radius: 0px;
+    line-height: 1.6;
+  }
+
+  /* Lists */
+  ul,
+  ol {
+    margin-bottom: 1em;
+    padding-left: 1.5em;
+  }
+
+  li {
+    margin-bottom: 0.5em;
+    line-height: 1.7;
+  }
+
+  /* Links */
+  a {
+    color: var(--primary);
+    text-decoration: none;
+    transition: color 0.2s ease;
+  }
+
+  a:hover {
+    color: var(--primary);
+    text-decoration: underline;
+  }
+
+  /* Button text styling - Clean and direct */
+  button {
+    @apply font-medium;
+    transition: all 0.15s ease-out;
+    letter-spacing: -0.005em;
+  }
+
+  /* Focus states - Clear and professional */
+  *:focus-visible {
+    @apply outline-2 outline-offset-2;
+    outline-color: var(--primary);
+  }
+
+  /* Minimal transitions - Quick and purposeful */
+  * {
+    transition-timing-function: ease-out;
+  }
+
+  /* Label text for forms */
+  label {
+    @apply font-medium text-sm;
+    line-height: 1.5;
+    letter-spacing: -0.008em;
+  }
+
+  /* Table typography */
+  table {
+    font-size: 0.9375em;
+  }
+
+  thead {
+    @apply font-semibold;
+  }
+
+  /* Utility classes for text hierarchy - Minimalist approach */
+  .text-display {
+    @apply text-5xl md:text-6xl font-semibold;
+    line-height: 1.05;
+    letter-spacing: -0.025em;
+  }
+
+  .text-lead {
+    font-size: 1.125rem;
+    line-height: 1.6;
+    color: var(--muted-foreground);
+  }
+
+  .text-body {
+    font-size: 0.9375rem;
+    line-height: 1.65;
+  }
+
+  .text-caption {
+    font-size: 0.8125rem;
+    line-height: 1.5;
+    color: var(--muted-foreground);
+  }
+
+  .text-overline {
+    font-size: 0.6875rem;
+    font-weight: 600;
+    line-height: 1.4;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--muted-foreground);
+  }
+
+  /* Graph Paper Alignment Utilities */
+  .grid-align {
+    display: grid;
+    gap: var(--grid-size);
+  }
+
+  .spacing-generous {
+    padding: calc(var(--grid-size) * 3);
+  }
+
+  .spacing-comfortable {
+    padding: calc(var(--grid-size) * 2);
+  }
+
+  .spacing-minimal {
+    padding: var(--grid-size);
+  }
+
+  /* Welcome Animation Keyframes */
+  @keyframes welcome-popup {
+    0% {
+      opacity: 0;
+      transform: scale(0.95) translateY(20px);
+    }
+
+    100% {
+      opacity: 1;
+      transform: scale(1) translateY(0);
+    }
+  }
+
+  @keyframes welcome-exit {
+    0% {
+      transform: translateY(0);
+    }
+
+    100% {
+      transform: translateY(-100%);
+    }
+  }
+
+  .animate-welcome-popup {
+    animation: welcome-popup 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  }
+
+  .animate-welcome-exit {
+    animation: welcome-exit 0.6s cubic-bezier(0.7, 0, 0.3, 1) forwards;
+  }
+
+  @keyframes loading {
+    0% {
+      transform: scaleX(0);
+    }
+
+    50% {
+      transform: scaleX(0.5);
+    }
+
+    100% {
+      transform: scaleX(1);
+    }
+  }
+}
