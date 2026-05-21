@@ -206,9 +206,9 @@ export function DocumentEditor({
       format: "mermaid",
       // Starter flow that works without edits — encourages the user to tweak.
       source: `flowchart TD
-  A[Raw materials] --> B[Production process]
-  B --> C[CBAM goods]
-  B --> D[Direct emissions]`,
+  A[Inputs] --> B[Operations]
+  B --> C[Outputs]
+  B --> D[Emissions]`,
       caption: "",
     });
   }, [activeBlockId, insertBlockAfter]);

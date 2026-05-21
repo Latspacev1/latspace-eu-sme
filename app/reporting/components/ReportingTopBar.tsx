@@ -9,8 +9,9 @@ interface ReportingTopBarProps {
   onCategory: (v: FrameworkCategory | "") => void;
   status: FrameworkStatus | "";
   onStatus: (v: FrameworkStatus | "") => void;
-  onAutofill: () => void;
-  autofillDisabled: boolean;
+  /** Optional — when absent, the Autofill button is hidden. */
+  onAutofill?: () => void;
+  autofillDisabled?: boolean;
 }
 
 export function ReportingTopBar({
@@ -68,14 +69,17 @@ export function ReportingTopBar({
         <option value="coming-soon">Coming Soon</option>
       </select>
 
-      {/* Autofill button */}
-      <button
-        onClick={onAutofill}
-        disabled={autofillDisabled}
-        className="ml-auto rounded-md bg-brand px-4 py-2 text-sm font-medium text-white hover:bg-brand/90 disabled:opacity-50 disabled:cursor-not-allowed"
-      >
-        Autofill
-      </button>
+      {/* Autofill button — server-driven autofill belongs to API-mode
+          frameworks. When none are present (current state), hide the button. */}
+      {onAutofill && (
+        <button
+          onClick={onAutofill}
+          disabled={autofillDisabled}
+          className="ml-auto rounded-md bg-brand px-4 py-2 text-sm font-medium text-white hover:bg-brand/90 disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          Autofill
+        </button>
+      )}
     </div>
   );
 }

@@ -4,12 +4,12 @@
 // machinery for no real benefit. If the rules diverge the duplication will
 // be obvious; today they don't.
 
-export type Framework = "cbam" | "cdp" | "brsr";
+export type Framework = "cdp" | "vsme";
 
 export function resolveRagFramework(frameworkId: string | undefined | null): Framework {
-  if (!frameworkId) return "cbam";
+  if (!frameworkId) return "vsme";
   const id = frameworkId.toLowerCase();
   if (id === "cdp") return "cdp";
-  if (id === "brsr") return "brsr";
-  return "cbam";
+  // vsme, vsme-narrative, and any other id default to the VSME index.
+  return "vsme";
 }

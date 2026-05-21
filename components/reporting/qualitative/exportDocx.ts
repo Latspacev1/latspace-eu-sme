@@ -243,7 +243,7 @@ async function svgFromMermaid(source: string): Promise<string> {
     flowchart: { htmlLabels: false },
     class: { htmlLabels: false },
   });
-  const id = `mmd-export-${Math.random().toString(36).slice(2, 8)}`;
+  const id = `diagram-export-${Math.random().toString(36).slice(2, 8)}`;
   const { svg } = await m.render(id, source);
 
   // Mount into a detached-but-attached host so computed styles resolve. We
@@ -547,7 +547,7 @@ export async function buildDocx(doc: QualitativeDoc): Promise<Blob> {
   }
 
   const document = new Document({
-    creator: "CBAM Reporting",
+    creator: "Sustainability Reporting",
     title: doc.title,
     styles: {
       default: {

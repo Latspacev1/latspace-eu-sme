@@ -1,0 +1,14 @@
+{
+  "framework": "vsme",
+  "pdfPath": "C:\\Users\\ishan\\vsmev1\\vsme_merged.pdf",
+  "builtAt": "2026-05-21T18:38:25.914Z",
+  "embedModel": "voyage-3-large",
+  "contextualizerModel": null,
+  "contextualRetrieval": false,
+  "chunkCount": 100,
+  "leafSectionCount": 55,
+  "pageCount": 95,
+  "firstBodyPage": 1,
+  "targetTokens": 700,
+  "overlapTokens": 80
+}

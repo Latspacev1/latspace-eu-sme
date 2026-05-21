@@ -1,6 +1,6 @@
 # Agent runner setup
 
-The CBAM MMD (qualitative editor) uses a Claude Agent SDK runner hosted in
+The VSME Narrative report (qualitative editor) uses a Claude Agent SDK runner hosted in
 [Vercel Sandbox](https://vercel.com/docs/vercel-sandbox). The Next.js routes
 `/api/reporting/chat` and `/api/reporting/write` spawn a fresh sandbox per
 request and stream NDJSON back to the browser.

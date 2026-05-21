@@ -130,7 +130,7 @@ interface ChildRowProps {
 
 export function ChildRow({ fw, inst, instanceCount = 0, onClick, onExportClick }: ChildRowProps) {
   const comingSoon = fw.status === "coming-soon";
-  const href = inst ? `/reporting/${fw.id}?instance=${inst.id}` : `/reporting/${fw.id}/new`;
+  const href = `/reporting/${fw.id}`;
 
   return (
     <div className="grid grid-cols-[2fr_3fr_1.2fr_1fr_0.8fr] items-center border-b border-slate-100 px-5 py-4 last:border-b-0 hover:bg-slate-50/60">
@@ -198,7 +198,7 @@ export function ChildRow({ fw, inst, instanceCount = 0, onClick, onExportClick }
   );
 }
 
-// ── Flat row (RCO-style, no parent) ──────────────────────────────────────────
+// ── Flat row (no parent — for top-level frameworks shown without children) ──────────────────────────────────────────
 
 interface FlatRowProps {
   fw: FrameworkDef;
@@ -210,7 +210,7 @@ interface FlatRowProps {
 
 export function FlatRow({ fw, inst, instanceCount = 0, onClick, onExportClick }: FlatRowProps) {
   const comingSoon = fw.status === "coming-soon";
-  const href = inst ? `/reporting/${fw.id}?instance=${inst.id}` : `/reporting/${fw.id}/new`;
+  const href = `/reporting/${fw.id}`;
 
   return (
     <div className="grid grid-cols-[2fr_3fr_1.2fr_1fr_0.8fr] items-center border-b border-slate-100 px-5 py-4 last:border-b-0 hover:bg-slate-50/60">

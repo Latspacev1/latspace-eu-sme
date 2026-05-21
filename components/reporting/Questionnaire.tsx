@@ -1,16 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useQueryClient } from "@tanstack/react-query";
 import type { ComputeContext, FieldsQuestion, Question, Section } from "@/lib/reporting/frameworkTypes";
 import { FieldHelp, FieldLabel, FieldRenderer, isFilled, isValid, type RowValues } from "@/components/reporting/Fields";
-import { TableField } from "@/components/reporting/TableField";
 import { QuestionnaireSidebar } from "@/components/reporting/QuestionnaireSidebar";
 import { QuestionnaireHeader } from "@/components/reporting/QuestionnaireHeader";
 import { QuestionPanel } from "@/components/reporting/QuestionPanel";
-import { AssistantPane } from "@/components/reporting/AssistantPane";
 import { AssistantPane as QualitativeAssistantPane } from "@/components/reporting/qualitative/AssistantPane";
-import { reportingApi } from "@/lib/api/reporting";
 import { ConfirmDialog, type ConfirmDialogState } from "@/components/reporting/ConfirmDialog";
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -30,29 +26,13 @@ export interface QuestionnaireConfig {
   frameworkId: string;
   frameworkName: string;
   version?: string;
-  /** Set true for CBAM CT, BRSR, CDP — persists to localStorage, skips API. */
+  /** Set true for the current frameworks (CDP, VSME) — persists to localStorage. */
   localMode?: boolean;
   /** localStorage key when `localMode` is true. */
   storageKey?: string;
   /** Optional question id to focus on first render (used for /reporting?q=…). */
   initialQuestionId?: string;
-  /** Required in API mode. */
-  instanceId?: string;
-  /** Required in API mode. */
-  initialAnswers?: Record<string, { values: Record<string, unknown>; rows: Record<string, unknown>[]; status: string }>;
-  /** Required in API mode. */
-  onSectionChange?: (sectionId: string, values: Record<string, unknown>) => void;
-  onCompleteSection?: (sectionId: string) => void;
-  onReopenSection?: (sectionId: string) => void;
-  onResetSection?: (sectionId: string) => void;
-  /** Required in API mode. */
-  onAutofill?: () => Promise<void>;
   onExport: () => Promise<void>;
-  plantId?: string;
-  orgId?: string;
-  financialYear?: number;
-  /** Per-section autofill confidence: { sectionId → 0–1 } */
-  sectionConfidence?: Record<string, number | null>;
 }
 
 export interface PanesState {
@@ -165,33 +145,18 @@ function FieldsForm({ q, values, onChange, computeCtx }: { q: FieldsQuestion; va
 export function Questionnaire({ config, initialQuestionId: initialQuestionIdProp }: { config: QuestionnaireConfig; initialQuestionId?: string }) {
   const { sections, localMode, storageKey } = config;
   const initialQuestionId = initialQuestionIdProp ?? config.initialQuestionId;
-  const qc = useQueryClient();
 
   const allQuestions = useMemo(
     () => sections.flatMap((s) => s.questions.map((q) => ({ section: s, q }))),
     [sections],
   );
 
-  // Initialise: API mode reads from server-provided initialAnswers; local mode
-  // starts blank and hydrates from localStorage in the useEffect below.
+  // Start every question blank; localStorage hydration runs in the useEffect
+  // below.
   const [answers, setAnswers] = useState<Record<string, QuestionState>>(() => {
     const init: Record<string, QuestionState> = {};
-    for (const { section, q } of allQuestions) {
-      const saved = config.initialAnswers?.[section.id];
-      if (saved) {
-        const rawStatus = (saved.status ?? "not_started").replace(/_/g, "-") as Status;
-        const state: QuestionState = {
-          values: (saved.values ?? {}) as RowValues,
-          rows: (saved.rows ?? []) as RowValues[],
-          status: rawStatus,
-        };
-        if (state.status !== "completed") {
-          state.status = deriveStatus(q, state);
-        }
-        init[q.id] = state;
-      } else {
-        init[q.id] = blankState(q);
-      }
+    for (const { q } of allQuestions) {
+      init[q.id] = blankState(q);
     }
     return init;
   });
@@ -291,12 +256,8 @@ export function Questionnaire({ config, initialQuestionId: initialQuestionIdProp
       const current = prev[id];
       const found = allQuestions.find((x) => x.q.id === id)!;
       const q = found.q;
-      const sectionId = found.section.id;
       const merged = { ...current, ...patchData };
       const autoStatus = deriveStatus(q, merged);
-      if (patchData.values && config.onSectionChange) {
-        config.onSectionChange(sectionId, patchData.values as Record<string, unknown>);
-      }
       return { ...prev, [id]: { ...merged, status: autoStatus, updatedAt: new Date().toISOString() } };
     });
   }
@@ -304,7 +265,6 @@ export function Questionnaire({ config, initialQuestionId: initialQuestionIdProp
   function setStatus(id: string, status: Status) {
     const found = allQuestions.find((x) => x.q.id === id);
     if (!found) return;
-    const wasCompleted = answers[id]?.status === "completed";
     const currentState = answers[id];
     const autoStatus = deriveStatus(found.q, currentState);
 
@@ -315,7 +275,7 @@ export function Questionnaire({ config, initialQuestionId: initialQuestionIdProp
         variant: "warning",
         onConfirm: () => {
           setConfirmDialog(null);
-          applyStatus(id, status, found, wasCompleted);
+          applyStatus(id, status);
         },
       });
       return;
@@ -336,30 +296,16 @@ export function Questionnaire({ config, initialQuestionId: initialQuestionIdProp
               updatedAt: new Date().toISOString(),
             },
           }));
-          if (config.onResetSection) {
-            config.onResetSection(found.section.id);
-          }
         },
       });
       return;
     }
 
-    applyStatus(id, status, found, wasCompleted);
+    applyStatus(id, status);
   }
 
-  function applyStatus(
-    id: string,
-    status: Status,
-    found: (typeof allQuestions)[number],
-    wasCompleted: boolean,
-  ) {
+  function applyStatus(id: string, status: Status) {
     setAnswers((prev) => ({ ...prev, [id]: { ...prev[id], status, updatedAt: new Date().toISOString() } }));
-    if (status === "completed" && found && config.onCompleteSection) {
-      config.onCompleteSection(found.section.id);
-    }
-    if (wasCompleted && status !== "completed" && found && config.onReopenSection) {
-      config.onReopenSection(found.section.id);
-    }
   }
 
   function filteredSections() {
@@ -370,14 +316,9 @@ export function Questionnaire({ config, initialQuestionId: initialQuestionIdProp
       .filter((s) => s.questions.length > 0);
   }
 
-  const onSectionSync = useCallback(async () => {
-    if (!active) return;
-    // Local mode (CBAM, BRSR, CDP) has no server-side autofill — no-op.
-    if (localMode || !config.instanceId) return;
-    const resp = await reportingApi.triggerSectionAutofill(config.instanceId, active.section.id);
-    if (!resp.success) throw new Error(resp.message ?? "Section sync failed.");
-    await qc.invalidateQueries({ queryKey: ["reporting-instance", config.instanceId] });
-  }, [localMode, config.instanceId, active?.section.id, qc]);
+  // No server-side autofill in the local-storage-only mode — kept as a no-op
+  // because QuestionPanel's prop type still expects an `onSectionSync`.
+  const onSectionSync = useCallback(async () => {}, []);
 
   if (!active) {
     return <div className="flex h-full items-center justify-center text-sm text-slate-400">No questions available.</div>;
@@ -440,7 +381,6 @@ export function Questionnaire({ config, initialQuestionId: initialQuestionIdProp
         frameworkName={config.frameworkName}
         version={config.version}
         onExport={config.onExport}
-        onAutofill={config.onAutofill}
       />
       <div className="flex flex-1 overflow-hidden">
         {panes.leftCollapsed ? (
@@ -479,7 +419,6 @@ export function Questionnaire({ config, initialQuestionId: initialQuestionIdProp
           onReopen={() => setStatus(active.q.id, "in-progress")}
           computeCtx={computeCtx}
           FieldsForm={FieldsForm}
-          autofillConfidence={config.sectionConfidence?.[active.section.id] ?? null}
           onSectionSync={onSectionSync}
         />
         {panes.rightCollapsed ? (
@@ -487,33 +426,16 @@ export function Questionnaire({ config, initialQuestionId: initialQuestionIdProp
         ) : (
           <>
             <ResizeHandle onMouseDown={onDragStart("right")} />
-            {localMode ? (
-              // Local-mode frameworks (CBAM CT, BRSR, CDP) use the qualitative
-              // AssistantPane which posts to /api/reporting/chat with framework
-              // context for per-framework RAG retrieval (CBAM / CDP / BRSR
-              // indices).
-              <QualitativeAssistantPane
-                width={panes.rightWidth}
-                onWidthChange={(w) => setPanes((p) => ({ ...p, rightWidth: w }))}
-                onCollapse={() => setPanes((p) => ({ ...p, rightCollapsed: true }))}
-                frameworkId={config.frameworkId}
-                activeQuestion={activeQuestionContext}
-                activeAnswer={activeAnswerSummary}
-              />
-            ) : (
-              // API-mode frameworks (CCTS, RCO) use the simple chat pane that
-              // talks to vsmev1's existing /api/chat endpoint and includes the
-              // plant/instance context the backend needs.
-              <AssistantPane
-                width={panes.rightWidth}
-                onCollapse={() => setPanes((p) => ({ ...p, rightCollapsed: true }))}
-                plantId={config.plantId}
-                financialYear={config.financialYear}
-                instanceId={config.instanceId}
-                sectionId={active.section.id}
-                localMode={localMode}
-              />
-            )}
+            {/* The pane posts to /api/reporting/chat with framework context so
+                the agent retrieves from the right RAG index (CDP or VSME). */}
+            <QualitativeAssistantPane
+              width={panes.rightWidth}
+              onWidthChange={(w) => setPanes((p) => ({ ...p, rightWidth: w }))}
+              onCollapse={() => setPanes((p) => ({ ...p, rightCollapsed: true }))}
+              frameworkId={config.frameworkId}
+              activeQuestion={activeQuestionContext}
+              activeAnswer={activeAnswerSummary}
+            />
           </>
         )}
       </div>

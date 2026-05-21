@@ -78,7 +78,7 @@ interface PaneProps {
   onAcceptProposal?: (proposalId: string) => void;
   onRejectProposal?: (proposalId: string) => void;
   onScrollToProposal?: (proposalId: string) => void;
-  // Framework registry id (e.g. "cbam", "cbam-mmd", "cdp"). Forwarded to the
+  // Framework registry id (e.g. "cdp", "vsme", "vsme-narrative"). Forwarded to the
   // chat/write APIs so the agent retrieves from the right guidance index.
   frameworkId?: string;
   // Excel-style: the question the user is currently looking at. Sent with each
@@ -139,17 +139,17 @@ function askSuggestionsFor(frameworkId: string | undefined): string[] {
       "Explain the guidance",
     ];
   }
-  if (frameworkId === "brsr") {
+  if (frameworkId === "vsme" || frameworkId === "vsme-narrative") {
     return [
-      "Explain the Essential vs Leadership indicators for this principle",
-      "What disclosures does the BRSR require for GHG emissions?",
-      "Which questions can I cross-reference from GRI / TCFD?",
+      "What does VSME require for this disclosure?",
+      "Is this Basic or Comprehensive module?",
+      "How can an SME estimate this if data is missing?",
     ];
   }
   return [
-    "What does the regulation require for system boundaries?",
-    "Summarise the QA/QC procedures",
-    "What goes into the Monitoring Methodology Document?",
+    "What does the framework require for this disclosure?",
+    "Explain the guidance for this section",
+    "Suggest data sources I could cite here",
   ];
 }
 
@@ -161,16 +161,16 @@ function writeSuggestionsFor(frameworkId: string | undefined): string[] {
       "Insert a paragraph on board-level oversight",
     ];
   }
-  if (frameworkId === "brsr") {
+  if (frameworkId === "vsme" || frameworkId === "vsme-narrative") {
     return [
-      "Draft the Principle 6 Essential disclosure on energy & GHG emissions",
-      "Insert a table for employee break-up by gender and category",
-      "Add a paragraph on the grievance redressal mechanism for stakeholders",
+      "Draft a B3 energy and emissions narrative",
+      "Add a section on B8 workforce characteristics",
+      "Insert a paragraph on B11 anti-corruption practices",
     ];
   }
   return [
-    "Add a new section after Section 2 about QA/QC procedures",
-    "Insert a paragraph below the system boundary heading",
+    "Add a new section after Section 2",
+    "Insert a paragraph below the heading above",
     "Draft a table summarising data sources",
   ];
 }

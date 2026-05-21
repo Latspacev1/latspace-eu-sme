@@ -1,13 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { buildMmdSeed } from "@/lib/reporting/qualitative/mmdSeed";
+import { buildVsmeSeed } from "@/lib/reporting/qualitative/vsmeSeed";
 import { readDoc, writeDoc } from "@/lib/reporting/qualitative/storage";
 import type { QualitativeDoc } from "@/lib/reporting/qualitative/types";
 
-// Loads the doc from localStorage (or seeds from the MMD template the first
-// time) and returns a [doc, setDoc] pair. Writes are debounced by a microtask
-// queue to avoid quadratic localStorage writes on rapid edits.
+// Loads the doc from localStorage (or seeds from the per-framework template
+// the first time) and returns a [doc, setDoc] pair. Writes are debounced by a
+// microtask queue to avoid quadratic localStorage writes on rapid edits.
 export function useQualitativeDoc(frameworkId: string) {
   const [doc, setDocState] = useState<QualitativeDoc | null>(null);
   const pending = useRef<QualitativeDoc | null>(null);
@@ -20,12 +20,12 @@ export function useQualitativeDoc(frameworkId: string) {
       setDocState({ ...existing, proposals: existing.proposals ?? [] });
       return;
     }
-    // Seed first-load. For frameworks other than cbam-mmd we still produce a
-    // skeleton so the editor can mount, but with empty requirements/metrics.
-    const seeded =
-      frameworkId === "cbam-mmd"
-        ? buildMmdSeed(frameworkId)
-        : ({
+    // Seed first-load. The VSME narrative report has its own template seed;
+    // other frameworks get a minimal skeleton so the editor can still mount.
+    const seeded: QualitativeDoc =
+      frameworkId === "vsme-narrative"
+        ? buildVsmeSeed(frameworkId)
+        : {
             frameworkId,
             title: "Untitled report",
             blocks: [
@@ -36,7 +36,7 @@ export function useQualitativeDoc(frameworkId: string) {
             comments: [],
             proposals: [],
             updatedAt: new Date().toISOString(),
-          } satisfies QualitativeDoc);
+          };
     setDocState(seeded);
     writeDoc(seeded);
   }, [frameworkId]);

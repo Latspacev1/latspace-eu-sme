@@ -1,10 +1,10 @@
-// LocalStorage persistence for hybrid-mode frameworks (CBAM CT, BRSR, CDP).
-// CCTS and RCO go through reportingApi instead — see lib/api/reporting.ts.
+// LocalStorage persistence for the reporting frameworks (CDP, VSME Digital
+// Template). The VSME Narrative report uses its own qualitative storage layer
+// (lib/reporting/qualitative).
 
-export const CBAM_ANSWERS_KEY = "cbam-app/v1";
-export const CBAM_ASSIGNEES_KEY = "cbam-app/assignees/v1";
-export const BRSR_ANSWERS_KEY = "brsr-app/v1";
 export const CDP_ANSWERS_KEY = "cdp-app/v1";
+export const VSME_ANSWERS_KEY = "vsme-app/v1";
+const ASSIGNEES_KEY_PREFIX = "reporting-app/assignees/v1";
 
 export type Status = "not-started" | "in-progress" | "completed";
 
@@ -32,7 +32,7 @@ export type Assignees = Record<string, string[]>;
 export function readAssignees(frameworkId: string): Assignees {
   if (typeof window === "undefined") return {};
   try {
-    const raw = localStorage.getItem(`${CBAM_ASSIGNEES_KEY}/${frameworkId}`);
+    const raw = localStorage.getItem(`${ASSIGNEES_KEY_PREFIX}/${frameworkId}`);
     return raw ? (JSON.parse(raw) as Assignees) : {};
   } catch {
     return {};
@@ -41,7 +41,7 @@ export function readAssignees(frameworkId: string): Assignees {
 
 export function writeAssignees(frameworkId: string, a: Assignees): void {
   if (typeof window === "undefined") return;
-  localStorage.setItem(`${CBAM_ASSIGNEES_KEY}/${frameworkId}`, JSON.stringify(a));
+  localStorage.setItem(`${ASSIGNEES_KEY_PREFIX}/${frameworkId}`, JSON.stringify(a));
 }
 
 export const mockUsers = [

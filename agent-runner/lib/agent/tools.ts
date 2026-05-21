@@ -43,17 +43,14 @@ interface AgentMcpOptions {
 // description. Knowing what the agent is actually retrieving from helps the
 // model decide when to call the tool and what to query for.
 const FRAMEWORK_INFO: Record<Framework, { docName: string; sectionExample: string }> = {
-  cbam: {
-    docName: "the official EU CBAM guidance document",
-    sectionExample: "§6.4.3",
-  },
   cdp: {
     docName: "the official CDP 2026 questionnaire guidance document",
     sectionExample: "§C2.2a",
   },
-  brsr: {
-    docName: "the SEBI BRSR guidance note (Annexure II)",
-    sectionExample: "§C.P3.E.Q5",
+  vsme: {
+    docName:
+      "the official EFRAG Voluntary Sustainability Reporting Standard for non-listed SMEs (VSME) guidance",
+    sectionExample: "§B3",
   },
 };
 
