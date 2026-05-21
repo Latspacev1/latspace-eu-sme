@@ -78,10 +78,10 @@ export const FRAMEWORKS: FrameworkDef[] = [
       },
       {
         id: "vsme-narrative",
-        name: "VSME Narrative Report",
-        shortName: "Narrative Report",
+        name: "VSME Sustainability Report",
+        shortName: "Sustainability Report",
         description:
-          "Narrative sustainability report aligned to the VSME standard — qualitative document with embedded disclosure requirements, AI drafting assistant, and DOCX export.",
+          "Sustainability report aligned to the VSME standard — qualitative document with embedded disclosure requirements, AI drafting assistant, and DOCX export.",
         cadence: "Annual",
         category: "Sustainability",
         status: "active",

@@ -291,7 +291,7 @@ const comments: Comment[] = [];
 export function buildVsmeSeed(frameworkId: string): QualitativeDoc {
   return {
     frameworkId,
-    title: "VSME Sustainability Report — Acme SME Ltd",
+    title: "VSME Sustainability Report",
     blocks,
     requirements,
     metrics,

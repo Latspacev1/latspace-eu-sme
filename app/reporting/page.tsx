@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import {
@@ -9,8 +9,9 @@ import {
   type FrameworkCategory,
   type FrameworkStatus,
 } from "@/lib/reporting/frameworks";
+import { getFrameworkProgress } from "@/lib/reporting/progress";
 import { ReportingTopBar } from "./components/ReportingTopBar";
-import { ParentRow, ChildRow, FlatRow } from "./components/ReportingRow";
+import { ParentRow, ChildRow, FlatRow, REPORTING_GRID } from "./components/ReportingRow";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -45,6 +46,10 @@ function matchesLeaf(
   return true;
 }
 
+// Frameworks that have an exporter wired up. Used to enable/disable the Export
+// button on each row.
+const EXPORTABLE_IDS = new Set(["cdp", "vsme", "vsme-narrative"]);
+
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export default function ReportingPage() {
@@ -62,6 +67,38 @@ export default function ReportingPage() {
     return init;
   });
 
+  // Bumped by Sync (and on mount) to re-read progress from localStorage. The
+  // table is otherwise a pure function of FRAMEWORKS + this counter.
+  const [progressVersion, setProgressVersion] = useState(0);
+
+  // Refresh progress when the page becomes visible again (e.g. user returns
+  // from the editor) so the bars reflect any work done there.
+  useEffect(() => {
+    const onVis = () => {
+      if (document.visibilityState === "visible") {
+        setProgressVersion((v) => v + 1);
+      }
+    };
+    document.addEventListener("visibilitychange", onVis);
+    return () => document.removeEventListener("visibilitychange", onVis);
+  }, []);
+
+  // Memoised progress map — recomputed when filters change (cheap) or when the
+  // user hits Sync.
+  const progressByFrameworkId = useMemo(() => {
+    const out: Record<string, number | null> = {};
+    for (const fw of FRAMEWORKS) {
+      out[fw.id] = getFrameworkProgress(fw);
+      if (fw.children) {
+        for (const c of fw.children) {
+          out[c.id] = getFrameworkProgress(c);
+        }
+      }
+    }
+    return out;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [progressVersion]);
+
   function openFramework(fw: FrameworkDef) {
     // Parent rows just toggle expand/collapse — they have no editor of their
     // own. Children navigate to the framework editor.
@@ -72,9 +109,9 @@ export default function ReportingPage() {
     router.push(`/reporting/${fw.id}`);
   }
 
-  // Export from the table — runs the same exporter that the editor uses,
-  // reading from localStorage. Lazy-imported so the export libs (docx, exceljs)
-  // don't ship in the table-page bundle.
+  // Export from the table — runs the same exporter the editor uses, reading
+  // from localStorage. Lazy-imported so the export libs (docx, exceljs) don't
+  // ship in the table-page bundle.
   async function exportFramework(fw: FrameworkDef) {
     try {
       if (fw.id === "cdp") {
@@ -83,6 +120,17 @@ export default function ReportingPage() {
       } else if (fw.id === "vsme") {
         const { exportVsmeFilled } = await import("@/lib/reporting/vsmeExport/export");
         await exportVsmeFilled();
+      } else if (fw.id === "vsme-narrative") {
+        const [{ readDoc }, { downloadDocx }] = await Promise.all([
+          import("@/lib/reporting/qualitative/storage"),
+          import("@/components/reporting/qualitative/exportDocx"),
+        ]);
+        const doc = readDoc(fw.id);
+        if (!doc) {
+          toast.info("Open the report at least once before exporting.");
+          return;
+        }
+        await downloadDocx(doc);
       } else {
         toast.info("Export not available for this framework yet.");
       }
@@ -91,6 +139,11 @@ export default function ReportingPage() {
       toast.error("Export failed. See browser console for details.");
     }
   }
+
+  const handleSync = useCallback(() => {
+    setProgressVersion((v) => v + 1);
+    toast.success("Progress synced.");
+  }, []);
 
   // Build filtered table entries
   const { entries, leafTotal, leafMatching } = useMemo(() => {
@@ -137,6 +190,7 @@ export default function ReportingPage() {
         onCategory={setCategory}
         status={status}
         onStatus={setStatus}
+        onSync={handleSync}
       />
 
       <div className="flex items-baseline justify-between mb-4">
@@ -150,11 +204,10 @@ export default function ReportingPage() {
 
       <div className="overflow-hidden rounded-lg border border-slate-200 bg-white">
         {/* Header */}
-        <div className="grid grid-cols-[2fr_3fr_1.2fr_1fr_0.8fr] border-b border-slate-200 bg-slate-50 px-5 py-3 text-[11px] uppercase tracking-wider text-slate-500">
+        <div className={`grid ${REPORTING_GRID} border-b border-slate-200 bg-slate-50 px-5 py-3 text-[11px] uppercase tracking-wider text-slate-500`}>
           <div>Disclosure &amp; Report</div>
           <div>Description</div>
           <div>Progress</div>
-          <div></div>
           <div>Export</div>
         </div>
 
@@ -170,10 +223,10 @@ export default function ReportingPage() {
               <FlatRow
                 key={entry.fw.id}
                 fw={entry.fw}
-                inst={undefined}
-                instanceCount={0}
                 onClick={() => openFramework(entry.fw)}
                 onExportClick={() => exportFramework(entry.fw)}
+                progressPct={progressByFrameworkId[entry.fw.id] ?? null}
+                exportEnabled={EXPORTABLE_IDS.has(entry.fw.id)}
               />
             );
           }
@@ -187,17 +240,17 @@ export default function ReportingPage() {
                 open={isOpen}
                 onToggle={() => toggleParent(entry.fw.id)}
                 onClick={() => openFramework(entry.fw)}
-                childInstances={[]}
+                progressPct={progressByFrameworkId[entry.fw.id] ?? null}
               />
               {isOpen &&
                 entry.filteredChildren.map((child) => (
                   <ChildRow
                     key={child.id}
                     fw={child}
-                    inst={undefined}
-                    instanceCount={0}
                     onClick={() => openFramework(child)}
                     onExportClick={() => exportFramework(child)}
+                    progressPct={progressByFrameworkId[child.id] ?? null}
+                    exportEnabled={EXPORTABLE_IDS.has(child.id)}
                   />
                 ))}
             </div>

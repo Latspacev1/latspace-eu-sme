@@ -1,27 +1,16 @@
 "use client";
 
-import Link from "next/link";
 import type { FrameworkDef } from "@/lib/reporting/frameworks";
-import type { ReportingInstanceSummary } from "@/lib/api/reporting";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-function formatLastUpdated(inst: ReportingInstanceSummary | undefined): string {
-  if (!inst?.last_autofilled_at) return "—";
-  const d = new Date(inst.last_autofilled_at);
-  const dd = String(d.getDate()).padStart(2, "0");
-  const mm = String(d.getMonth() + 1).padStart(2, "0");
-  const yyyy = d.getFullYear();
-  return `Autofilled on ${dd}/${mm}/${yyyy}`;
-}
-
-function ProgressCell({ inst }: { inst: ReportingInstanceSummary | undefined }) {
-  if (!inst) return <span className="text-sm text-slate-400">—</span>;
+function ProgressCell({ pct }: { pct: number | null }) {
+  if (pct === null) return <span className="text-sm text-slate-400">—</span>;
   return (
     <>
-      <div className="text-sm font-medium text-slate-900">{inst.progress_pct}%</div>
+      <div className="text-sm font-medium text-slate-900">{pct}%</div>
       <div className="mt-1 h-1 w-24 rounded-full bg-slate-100 overflow-hidden">
-        <div className="h-full bg-brand" style={{ width: `${inst.progress_pct}%` }} />
+        <div className="h-full bg-brand" style={{ width: `${pct}%` }} />
       </div>
     </>
   );
@@ -46,6 +35,10 @@ function LogoCell({ fw }: { fw: FrameworkDef }) {
   );
 }
 
+// Grid template shared by header and rows. 4 columns: name | description |
+// progress | export.
+export const REPORTING_GRID = "grid-cols-[2fr_3fr_1.2fr_0.8fr]";
+
 // ── Parent row ────────────────────────────────────────────────────────────────
 
 interface ParentRowProps {
@@ -53,15 +46,13 @@ interface ParentRowProps {
   open: boolean;
   onToggle: () => void;
   onClick?: () => void;
-  childInstances?: ReportingInstanceSummary[];
+  progressPct: number | null;
 }
 
-export function ParentRow({ fw, open, onToggle, onClick, childInstances }: ParentRowProps) {
-  const reportCount = childInstances?.length ?? 0;
-
+export function ParentRow({ fw, open, onToggle, onClick, progressPct }: ParentRowProps) {
   return (
     <div
-      className="grid grid-cols-[2fr_3fr_1.2fr_1fr_0.8fr] items-center border-b border-slate-200 px-5 py-4 bg-slate-50/80 cursor-pointer select-none hover:bg-slate-100/60"
+      className={`grid ${REPORTING_GRID} items-center border-b border-slate-200 px-5 py-4 bg-slate-50/80 cursor-pointer select-none hover:bg-slate-100/60`}
       onClick={(e) => {
         // Clicking chevron area toggles, clicking elsewhere opens modal
         const target = e.target as HTMLElement;
@@ -72,20 +63,15 @@ export function ParentRow({ fw, open, onToggle, onClick, childInstances }: Paren
         }
       }}
     >
-      {/* Col 1: logo + name + chevron */}
+      {/* Col 1: chevron + logo + name */}
       <div className="flex items-center gap-3">
-        <LogoCell fw={fw} />
-        <div className="min-w-0">
-          <span className="font-semibold text-slate-900 truncate block">{fw.shortName}</span>
-          <span className="text-xs text-slate-500">{fw.cadence}</span>
-        </div>
         <button
           data-toggle
           onClick={(e) => {
             e.stopPropagation();
             onToggle();
           }}
-          className="ml-1 rounded p-0.5 hover:bg-slate-200"
+          className="rounded p-0.5 hover:bg-slate-200"
         >
           <svg
             className={`h-4 w-4 text-slate-400 shrink-0 transition-transform duration-200 ${open ? "rotate-0" : "-rotate-90"}`}
@@ -97,22 +83,22 @@ export function ParentRow({ fw, open, onToggle, onClick, childInstances }: Paren
             <path d="m6 9 6 6 6-6" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
         </button>
+        <LogoCell fw={fw} />
+        <div className="min-w-0">
+          <span className="font-semibold text-slate-900 truncate block">{fw.shortName}</span>
+          <span className="text-xs text-slate-500">{fw.cadence}</span>
+        </div>
       </div>
 
       {/* Col 2: description */}
       <div className="pr-4 text-sm text-slate-600 line-clamp-2">{fw.description}</div>
 
-      {/* Col 3: report count (no progress bar for parents) */}
-      <div className="text-sm text-slate-500">
-        {reportCount > 0
-          ? `${reportCount} report${reportCount !== 1 ? "s" : ""}`
-          : "—"}
+      {/* Col 3: progress — average across children */}
+      <div>
+        <ProgressCell pct={progressPct} />
       </div>
 
-      {/* Col 4: last updated — dash for parent */}
-      <div className="text-sm text-slate-400">—</div>
-
-      {/* Col 5: export */}
+      {/* Col 4: export — parents don't export directly */}
       <div className="text-sm text-slate-300">—</div>
     </div>
   );
@@ -122,37 +108,29 @@ export function ParentRow({ fw, open, onToggle, onClick, childInstances }: Paren
 
 interface ChildRowProps {
   fw: FrameworkDef;
-  inst: ReportingInstanceSummary | undefined;
-  instanceCount?: number;
   onClick?: () => void;
   onExportClick?: () => void;
+  progressPct: number | null;
+  exportEnabled: boolean;
 }
 
-export function ChildRow({ fw, inst, instanceCount = 0, onClick, onExportClick }: ChildRowProps) {
+export function ChildRow({ fw, onClick, onExportClick, progressPct, exportEnabled }: ChildRowProps) {
   const comingSoon = fw.status === "coming-soon";
-  const href = `/reporting/${fw.id}`;
 
   return (
-    <div className="grid grid-cols-[2fr_3fr_1.2fr_1fr_0.8fr] items-center border-b border-slate-100 px-5 py-4 last:border-b-0 hover:bg-slate-50/60">
+    <div className={`grid ${REPORTING_GRID} items-center border-b border-slate-100 px-5 py-4 last:border-b-0 hover:bg-slate-50/60`}>
       {/* Col 1: indented name */}
       <div className="flex items-center gap-3 pl-10">
         <div className="min-w-0">
           {comingSoon ? (
             <span className="font-medium text-slate-500 truncate block">{fw.shortName}</span>
-          ) : onClick ? (
+          ) : (
             <button
               onClick={onClick}
               className="font-medium text-slate-900 hover:underline truncate block text-left"
             >
               {fw.shortName}
             </button>
-          ) : (
-            <Link
-              href={href}
-              className="font-medium text-slate-900 hover:underline truncate block"
-            >
-              {fw.shortName}
-            </Link>
           )}
           <div className="flex items-center gap-2 mt-0.5">
             <span className="text-xs text-slate-500">{fw.cadence}</span>
@@ -168,23 +146,16 @@ export function ChildRow({ fw, inst, instanceCount = 0, onClick, onExportClick }
       {/* Col 2: description */}
       <div className="pr-4 text-sm text-slate-600 line-clamp-2">{fw.description}</div>
 
-      {/* Col 3: progress or instance count */}
+      {/* Col 3: progress */}
       <div>
-        {instanceCount > 1 ? (
-          <span className="text-sm text-slate-500">{instanceCount} reports</span>
-        ) : (
-          <ProgressCell inst={inst} />
-        )}
+        <ProgressCell pct={progressPct} />
       </div>
 
-      {/* Col 4: last updated — removed; shown in modal per-instance instead */}
-      <div className="text-sm text-slate-400">—</div>
-
-      {/* Col 5: export — opens modal to pick which instance */}
+      {/* Col 4: export */}
       <div>
-        {!comingSoon && inst ? (
+        {!comingSoon && exportEnabled ? (
           <button
-            onClick={onExportClick || onClick}
+            onClick={onExportClick}
             className="inline-flex items-center gap-1 text-sm text-slate-700 hover:text-slate-900"
           >
             <ExportIcon />
@@ -202,38 +173,30 @@ export function ChildRow({ fw, inst, instanceCount = 0, onClick, onExportClick }
 
 interface FlatRowProps {
   fw: FrameworkDef;
-  inst: ReportingInstanceSummary | undefined;
-  instanceCount?: number;
   onClick?: () => void;
   onExportClick?: () => void;
+  progressPct: number | null;
+  exportEnabled: boolean;
 }
 
-export function FlatRow({ fw, inst, instanceCount = 0, onClick, onExportClick }: FlatRowProps) {
+export function FlatRow({ fw, onClick, onExportClick, progressPct, exportEnabled }: FlatRowProps) {
   const comingSoon = fw.status === "coming-soon";
-  const href = `/reporting/${fw.id}`;
 
   return (
-    <div className="grid grid-cols-[2fr_3fr_1.2fr_1fr_0.8fr] items-center border-b border-slate-100 px-5 py-4 last:border-b-0 hover:bg-slate-50/60">
+    <div className={`grid ${REPORTING_GRID} items-center border-b border-slate-100 px-5 py-4 last:border-b-0 hover:bg-slate-50/60`}>
       {/* Col 1: logo + name */}
       <div className="flex items-center gap-3">
         <LogoCell fw={fw} />
         <div className="min-w-0">
           {comingSoon ? (
             <span className="font-medium text-slate-500 truncate block">{fw.shortName}</span>
-          ) : onClick ? (
+          ) : (
             <button
               onClick={onClick}
               className="font-medium text-slate-900 hover:underline truncate block text-left"
             >
               {fw.shortName}
             </button>
-          ) : (
-            <Link
-              href={href}
-              className="font-medium text-slate-900 hover:underline truncate block"
-            >
-              {fw.shortName}
-            </Link>
           )}
           <div className="flex items-center gap-2 mt-0.5">
             <span className="text-xs text-slate-500">{fw.cadence}</span>
@@ -249,23 +212,16 @@ export function FlatRow({ fw, inst, instanceCount = 0, onClick, onExportClick }:
       {/* Col 2: description */}
       <div className="pr-4 text-sm text-slate-600 line-clamp-2">{fw.description}</div>
 
-      {/* Col 3: progress or instance count */}
+      {/* Col 3: progress */}
       <div>
-        {instanceCount > 1 ? (
-          <span className="text-sm text-slate-500">{instanceCount} reports</span>
-        ) : (
-          <ProgressCell inst={inst} />
-        )}
+        <ProgressCell pct={progressPct} />
       </div>
 
-      {/* Col 4: last updated — removed; shown in modal per-instance instead */}
-      <div className="text-sm text-slate-400">—</div>
-
-      {/* Col 5: export — opens modal to pick which instance */}
+      {/* Col 4: export */}
       <div>
-        {!comingSoon && inst ? (
+        {!comingSoon && exportEnabled ? (
           <button
-            onClick={onExportClick || onClick}
+            onClick={onExportClick}
             className="inline-flex items-center gap-1 text-sm text-slate-700 hover:text-slate-900"
           >
             <ExportIcon />

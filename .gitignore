@@ -137,3 +137,8 @@ storybook-static
 **/public/worker-*.js
 **/public/sw.js
 **/public/fallback-*.js
+
+# Local-only spreadsheets and PDFs (templates, source data files at repo root)
+/*.xlsx
+/*.xlsm
+/*.pdf
