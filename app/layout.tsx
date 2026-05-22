@@ -19,7 +19,7 @@ const ibmPlexMono = IBM_Plex_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "CCTS Dashboard - Carbon Capture Trading System",
+  title: "EU - SME Sustainability Reporting",
   description:
     "Monitor emissions, compliance, and carbon trading for your organization",
 };

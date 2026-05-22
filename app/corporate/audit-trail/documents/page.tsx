@@ -67,8 +67,8 @@ export default function CorporateDocumentsPage() {
             <h2 className="text-[20px] font-semibold text-[#0A0A0A] mb-2">Coming Soon</h2>
             <p className="text-[14px] text-[#0A0A0A]/60 leading-relaxed max-w-md mx-auto">
               Document repository is currently under development. This feature will allow you to
-              upload, manage, and organize supporting documents across all your plants for CCTS
-              compliance.
+              upload, manage, and organize supporting documents across all your plants for
+              EU - SME Sustainability Reporting compliance.
             </p>
             <div className="flex justify-center gap-3 mt-8">
               <Button

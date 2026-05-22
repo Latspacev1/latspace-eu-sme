@@ -137,8 +137,8 @@ export default function CorporateAuditTrailPage() {
             Audit Trail
           </h1>
           <p className="text-[13px] text-[#0A0A0A]/60 mt-1">
-            Maintain comprehensive documentation and traceability for CCTS compliance across all
-            plants
+            Maintain comprehensive documentation and traceability for EU - SME Sustainability
+            Reporting compliance across all plants
           </p>
         </div>
       </div>

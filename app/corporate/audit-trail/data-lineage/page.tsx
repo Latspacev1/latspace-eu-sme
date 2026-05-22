@@ -67,7 +67,7 @@ export default function CorporateDataLineagePage() {
             <p className="text-[14px] text-[#0A0A0A]/60 leading-relaxed max-w-md mx-auto">
               Data lineage tracking is currently under development. This feature will allow you to
               trace emissions data back to source documents across all your plants and ensure
-              complete audit traceability for CCTS compliance.
+              complete audit traceability for EU - SME Sustainability Reporting compliance.
             </p>
             <div className="flex justify-center gap-3 mt-8">
               <Button

@@ -349,11 +349,11 @@ IMPORTANT
           <Search className="h-5 w-5 text-[#074D47] mt-0.5" />
           <div>
             <h4 className="font-medium text-[#074D47]">
-              CCTS Registration Lookup
+              EU - SME Sustainability Reporting Lookup
             </h4>
             <p className="text-sm text-gray-600 mt-1">
               Search by registration number or entity name to auto-populate
-              plant data from CCTS database.
+              plant data from the EU - SME Sustainability Reporting database.
             </p>
           </div>
         </div>
@@ -455,7 +455,7 @@ IMPORTANT
           <div className="flex items-center gap-2 text-green-800">
             <CheckCircle2 className="h-4 w-4" />
             <span className="text-sm font-medium">
-              Data populated from CCTS:{" "}
+              Data populated from EU - SME Sustainability Reporting:{" "}
               {selectedEntity.obligated_entity_registration_number}
             </span>
           </div>
@@ -646,7 +646,7 @@ IMPORTANT
             />
             {selectedEntity && selectedTargetYear && (
               <p className="text-xs text-green-600">
-                Auto-populated from CCTS data
+                Auto-populated from EU - SME Sustainability Reporting data
               </p>
             )}
           </div>
@@ -876,7 +876,7 @@ IMPORTANT
           </DialogTitle>
           <DialogDescription>
             {step === "registration-lookup" &&
-              "Search for existing CCTS registration or enter details manually"}
+              "Search for existing EU - SME Sustainability Reporting registration or enter details manually"}
             {step === "plant-details" &&
               "Configure baseline and target GEI values"}
             {step === "manager-credentials" &&

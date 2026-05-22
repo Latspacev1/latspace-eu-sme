@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import Image from "next/image";
 import { Zap, Flame, TrendingDown, Leaf } from "lucide-react";
@@ -10,6 +10,8 @@ import { Button } from "@/components/ui/button";
 import { KpiGroup } from "@/components/vsme/KpiGroup";
 import { HeadlineKpi } from "@/components/vsme/HeadlineKpi";
 import { TrendChart, type TrendSeries } from "@/components/vsme/TrendChart";
+import { AiSearchBar } from "@/components/dashboard/AiSearchBar";
+import { DashboardGrid } from "@/components/dashboard/DashboardGrid";
 import type { CurrentMetricRow, ParamSection } from "@/lib/supabase/types";
 
 // ──────────────────────────────────────────────────────────────────────
@@ -102,6 +104,14 @@ interface TimeseriesResponse {
 export function VsmeOverview() {
   const qc = useQueryClient();
   const [period] = useState("FY2025");
+  const [pinnedSpecKeys, setPinnedSpecKeys] = useState<Set<string>>(new Set());
+
+  // Stable identity so the grid's "publish pinned keys" effect doesn't refire
+  // on every render of this view.
+  const onGridChange = useCallback((keys: Set<string>) => setPinnedSpecKeys(keys), []);
+  const onPinned = useCallback(() => {
+    qc.invalidateQueries({ queryKey: ["dashboard-tiles"] });
+  }, [qc]);
 
   async function readError(res: Response, fallback: string) {
     const ct = res.headers.get("content-type") ?? "";
@@ -159,37 +169,15 @@ export function VsmeOverview() {
   }
   const get = (code: string) => byCode.get(code);
 
-  // ── Build trend chart options (one chart = one metric at a time, picker
-  // dropdown to swap to others in the same family). ─────────────────────
+  // ── Build trend chart series — one chart, one metric ─────────────────
   const ts = timeseriesQ.data;
   const findInput  = (code: string) => ts?.inputs.find(s => s.code === code);
   const findOutput = (code: string) => ts?.outputs.find(s => s.code === code);
 
-  const energyOptions: TrendSeries[] = ts ? [
-    findInput("electricity_total"),
-    findInput("electricity_peak"),
-    findInput("electricity_offpeak"),
-    findInput("natural_gas"),
-  ].filter((s): s is TrendSeries => !!s) : [];
-
-  const emissionsOptions: TrendSeries[] = ts ? [
-    findOutput("scope1_total"),
-    findOutput("scope2_location"),
-    findOutput("scope2_market"),
-    findOutput("scope_1_2_location"),
-    findOutput("scope_1_2_market"),
-  ].filter((s): s is TrendSeries => !!s) : [];
-
-  const feedstockOptions: TrendSeries[] = ts ? [
-    findInput("feed_alcohol_water"),
-    findInput("feed_starch_crespovit_looop"),
-    findInput("feed_starch_crespovit_duynie"),
-    findInput("feed_starch_hamino"),
-    findInput("naoh_25"),
-    findInput("naoh_32"),
-    findInput("brewers_yeast"),
-    findInput("ethanol_water"),
-  ].filter((s): s is TrendSeries => !!s) : [];
+  const totalEnergySeries  = findInput("electricity_total");
+  const naturalGasSeries   = findInput("natural_gas");
+  const scope1Series       = findOutput("scope1_total");
+  const feedstockSeries    = findInput("feed_alcohol_water");
 
   // ──────────────────────────────────────────────────────────────────
   return (
@@ -213,7 +201,6 @@ export function VsmeOverview() {
               </h1>
               <p className="text-[#1F5F5B] text-sm mt-1">
                 ChainCraft B.V. · {metricsQ.data?.period.label ?? period}
-                {metricsQ.data?.stale_count ? ` · ${metricsQ.data.stale_count} stale metrics` : ""}
               </p>
             </div>
           </div>
@@ -221,6 +208,16 @@ export function VsmeOverview() {
             {recalc.isPending ? "Recalculating…" : "Recalculate"}
           </Button>
         </header>
+
+        {/* ── AI search bar + pinned charts ───────────────────── */}
+        {/* The bar lives above all metrics so the user's primary action
+            (ask + pin) is at the top of the page. Pinned tiles render
+            directly underneath, replacing the dashed empty state with a
+            populated grid as soon as the user pins anything. */}
+        <section className="space-y-4">
+          <AiSearchBar pinnedSpecKeys={pinnedSpecKeys} onPinned={onPinned} />
+          <DashboardGrid onChange={onGridChange} />
+        </section>
 
         {/* ── Errors ──────────────────────────────────────────── */}
         {(metricsQ.error || timeseriesQ.error) && (
@@ -291,31 +288,33 @@ export function VsmeOverview() {
                   Monthly Trends · FY2025
                 </div>
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-                  {energyOptions.length > 0 && (
+                  {totalEnergySeries && (
                     <TrendChart
-                      title="Energy consumption"
+                      title="Electricity consumption"
                       months={ts.months}
-                      options={energyOptions}
-                      defaultCode="electricity_total"
+                      series={totalEnergySeries}
                     />
                   )}
-                  {emissionsOptions.length > 0 && (
+                  {naturalGasSeries && (
                     <TrendChart
-                      title="GHG emissions"
+                      title="Natural gas consumption"
                       months={ts.months}
-                      options={emissionsOptions}
-                      defaultCode="scope1_total"
+                      series={naturalGasSeries}
                     />
                   )}
-                  {feedstockOptions.length > 0 && (
-                    <div className="lg:col-span-2">
-                      <TrendChart
-                        title="Feedstock deliveries"
-                        months={ts.months}
-                        options={feedstockOptions}
-                        defaultCode="feed_alcohol_water"
-                      />
-                    </div>
+                  {scope1Series && (
+                    <TrendChart
+                      title="Scope 1 emissions"
+                      months={ts.months}
+                      series={scope1Series}
+                    />
+                  )}
+                  {feedstockSeries && (
+                    <TrendChart
+                      title="Feedstock deliveries"
+                      months={ts.months}
+                      series={feedstockSeries}
+                    />
                   )}
                 </div>
               </section>

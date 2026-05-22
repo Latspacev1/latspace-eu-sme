@@ -70,7 +70,7 @@ export default function LoginPage() {
               LatSpace
             </h1>
             <p className="text-[11px] text-[#074D47] tracking-[0.15em] uppercase mt-1">
-              CCTS Management System
+              EU - SME Sustainability Reporting
             </p>
           </div>
 
