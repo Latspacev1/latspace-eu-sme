@@ -1,15 +1,15 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useState } from "react";
 import { genId } from "@/lib/reporting/qualitative/storage";
-import type { Block, Proposal, Requirement } from "@/lib/reporting/qualitative/types";
+import type { Block, Proposal } from "@/lib/reporting/qualitative/types";
 import { AssistantPane, CollapsedAssistantRail, useAssistantPane } from "./AssistantPane";
 import { DocumentEditor } from "./DocumentEditor";
 import { downloadDocx } from "./exportDocx";
 import { Connected, Download, Pencil } from "./icons";
-import { RequirementDetailPanel } from "./RequirementDetailPanel";
-import { RequirementsTable } from "./RequirementsTable";
 import { useQualitativeDoc } from "./useQualitativeDoc";
+import { outputParamCodeFromId } from "./DocumentEditor";
+import { OutputParametersTab } from "@/components/reporting/OutputParametersTab";
 
 interface Props {
   frameworkId: string;
@@ -21,82 +21,12 @@ type Tab = "requirements" | "document";
 export function QualitativeReport({ frameworkId, frameworkName }: Props) {
   const { doc, setDoc } = useQualitativeDoc(frameworkId);
   const [tab, setTab] = useState<Tab>("document");
-  const [selectedRequirementId, setSelectedRequirementId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState(false);
+  // The Requirements tab's selected row, lifted into this parent so clicking
+  // an embedded output-parameter pill in the document can jump straight to
+  // the matching detail view.
+  const [requirementsSelectedCode, setRequirementsSelectedCode] = useState<string | null>(null);
   const { state: assistant, setState: setAssistant } = useAssistantPane();
-
-  const selectedRequirement = useMemo<Requirement | null>(
-    () => doc?.requirements.find((r) => r.id === selectedRequirementId) ?? null,
-    [doc, selectedRequirementId]
-  );
-
-  const updateRequirement = useCallback(
-    (next: Requirement) => {
-      setDoc((prev) => ({
-        ...prev,
-        requirements: prev.requirements.map((r) =>
-          r.id === next.id
-            ? {
-                ...next,
-                updatedAt: new Date().toISOString(),
-                activity: [
-                  ...next.activity,
-                  {
-                    id: genId("a"),
-                    at: new Date().toISOString(),
-                    actor: "you",
-                    message: "Requirement updated.",
-                  },
-                ],
-              }
-            : r
-        ),
-      }));
-    },
-    [setDoc]
-  );
-
-  const deleteRequirement = useCallback(
-    (id: string) => {
-      if (!window.confirm("Delete this requirement? Embedded references will show as missing.")) {
-        return;
-      }
-      setDoc((prev) => ({
-        ...prev,
-        requirements: prev.requirements.filter((r) => r.id !== id),
-      }));
-      setSelectedRequirementId(null);
-    },
-    [setDoc]
-  );
-
-  const addRequirement = useCallback(() => {
-    const id = `REQ-${Date.now().toString(36).toUpperCase()}`;
-    setDoc((prev) => ({
-      ...prev,
-      requirements: [
-        ...prev.requirements,
-        {
-          id,
-          name: "New requirement",
-          description: "",
-          response: null,
-          attachments: [],
-          activity: [
-            {
-              id: genId("a"),
-              at: new Date().toISOString(),
-              actor: "you",
-              message: "Requirement created.",
-            },
-          ],
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-        },
-      ],
-    }));
-    setSelectedRequirementId(id);
-  }, [setDoc]);
 
   // --- AI proposals ---------------------------------------------------------
   // Add a streamed proposal to the doc. Re-keys block ids so they don't
@@ -171,28 +101,6 @@ export function QualitativeReport({ frameworkId, frameworkName }: Props) {
     });
   }, []);
 
-  const syncDocumentSnapshots = useCallback(
-    (requirementId: string) => {
-      setDoc((prev) => {
-        const req = prev.requirements.find((r) => r.id === requirementId);
-        if (!req) return prev;
-        return {
-          ...prev,
-          blocks: prev.blocks.map((b) =>
-            b.kind === "requirement-ref" && b.requirementId === requirementId
-              ? {
-                  ...b,
-                  snapshot: req.response ?? { kind: "empty" },
-                  snapshotAt: new Date().toISOString(),
-                }
-              : b
-          ),
-        };
-      });
-    },
-    [setDoc]
-  );
-
   if (!doc) {
     return (
       <div className="flex h-full items-center justify-center text-sm text-slate-500">
@@ -205,17 +113,14 @@ export function QualitativeReport({ frameworkId, frameworkName }: Props) {
     void downloadDocx(doc);
   };
 
+  // Clicking a `requirement-ref` block jumps to the Requirements tab.
+  // If the embed is backed by an output parameter (id prefixed with
+  // OUTPUT:<code>), pre-select that row so the user lands directly on its
+  // detail view. Otherwise just switch tabs.
   const openRequirementFromDoc = (id: string) => {
-    setSelectedRequirementId(id);
+    const code = outputParamCodeFromId(id);
+    if (code) setRequirementsSelectedCode(code);
     setTab("requirements");
-  };
-
-  const adjacent = (delta: -1 | 1) => {
-    if (!selectedRequirementId) return;
-    const idx = doc.requirements.findIndex((r) => r.id === selectedRequirementId);
-    if (idx < 0) return;
-    const next = doc.requirements[(idx + delta + doc.requirements.length) % doc.requirements.length];
-    if (next) setSelectedRequirementId(next.id);
   };
 
   return (
@@ -241,25 +146,19 @@ export function QualitativeReport({ frameworkId, frameworkName }: Props) {
               onRejectProposal={rejectProposal}
             />
           ) : (
-            <RequirementsTable
-              doc={doc}
-              selectedId={selectedRequirementId}
-              onSelect={setSelectedRequirementId}
-              onAdd={addRequirement}
+            // Output parameters registry — same surface used inside the VSME
+            // and CDP questionnaires. The narrative report can't deep-link
+            // back to a structured question, so `onOpenQuestion` is omitted
+            // and "Used in" entries render as plain rows. Selection is
+            // controlled so the parent can jump straight to a row when the
+            // user clicks an embedded output-parameter pill in the doc.
+            <OutputParametersTab
+              frameworkId="vsme-narrative"
+              selectedCode={requirementsSelectedCode}
+              onSelectionChange={setRequirementsSelectedCode}
             />
           )}
         </div>
-        {tab === "requirements" && selectedRequirement && (
-          <RequirementDetailPanel
-            doc={doc}
-            requirement={selectedRequirement}
-            onChange={updateRequirement}
-            onClose={() => setSelectedRequirementId(null)}
-            onDelete={() => deleteRequirement(selectedRequirement.id)}
-            onSelectAdjacent={adjacent}
-            onSyncDocument={() => syncDocumentSnapshots(selectedRequirement.id)}
-          />
-        )}
         {assistant.collapsed ? (
           <CollapsedAssistantRail
             onExpand={() => setAssistant((s) => ({ ...s, collapsed: false }))}
