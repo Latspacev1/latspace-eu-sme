@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
-import { useRouter, usePathname } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { useAppStore } from "@/lib/store/useAppStore";
 import { useHasHydrated } from "@/lib/hooks/useHasHydrated";
 import { CorporateSidebar } from "@/components/shared/corporate-sidebar";
@@ -15,7 +15,6 @@ export default function CorporateLayout({
   children: React.ReactNode;
 }) {
   const router = useRouter();
-  const pathname = usePathname();
   const { isAuthenticated, sidebarCollapsed } = useAppStore();
   const hasHydrated = useHasHydrated();
 
@@ -33,11 +32,6 @@ export default function CorporateLayout({
     return null;
   }
 
-  // Determine if we should show a back button based on the current route
-  const isPlantDetailPage =
-    pathname?.startsWith("/corporate/plants/") &&
-    pathname !== "/corporate/plants";
-
   return (
     <div className="min-h-screen bg-white flex">
       <RouteRefresh />
@@ -48,9 +42,8 @@ export default function CorporateLayout({
           sidebarCollapsed ? "ml-16" : "ml-64"
         )}
       >
-        {/* Top Header Bar with conditional back button */}
         <PageHeader
-          showBackButton={isPlantDetailPage}
+          showBackButton={false}
           backButtonLabel="Back to Overview"
           backButtonHref="/corporate/overview"
         />

@@ -1,33 +1,18 @@
-// Types for the ChainCraft VSME schema. Mirror of supabase/migrations/0001_chaincraft_vsme.sql.
-// If you regenerate Supabase types via the CLI, replace this file with the generated one.
+// Types for the generic, multi-tenant metrics schema. Mirror of
+// supabase/migrations/0001_chaincraft_vsme.sql as amended by
+// 0004_genericize_org_scoping.sql (org_id scoping + free-text section).
+// If you regenerate Supabase types via the CLI, replace this file with the
+// generated one.
 
 export type ParamCategory = "input" | "emission_factor" | "output";
 
-export type ParamSection =
-  // Input sections
-  | "energy"
-  | "feedstock"
-  | "water"
-  | "wastewater"
-  | "air"
-  | "hazardous_waste"
-  | "workforce"
-  | "governance"
-  | "conversion"
-  // Output (VSME) sections
-  | "vsme_b3_energy"
-  | "vsme_b3_scope1"
-  | "vsme_b3_scope2"
-  | "vsme_b3_scope3"
-  | "vsme_b3_consolidated"
-  | "vsme_b6_water"
-  | "vsme_b4_pollution"
-  | "vsme_b7_waste"
-  | "vsme_b7_materials"
-  | "vsme_b8_b11_workforce_gov";
+// section was an enum (param_section) in the single-tenant schema; 0004 retyped
+// it to free text so extraction can invent per-org sections. The curated VSME
+// section names still live in lib/metrics/param-sections.ts.
 
 export interface ReportingPeriod {
   id: string;
+  org_id: string;
   code: string;
   label: string;
   start_date: string;
@@ -39,11 +24,12 @@ export interface ReportingPeriod {
 
 export interface Parameter {
   id: string;
+  org_id: string;
   code: string;
   display_name: string;
   unit: string;
   category: ParamCategory;
-  section: ParamSection;
+  section: string;
   vsme_cell: string | null;
   source_note: string | null;
   is_monthly: boolean;
@@ -54,6 +40,7 @@ export interface Parameter {
 
 export interface DataPoint {
   id: string;
+  org_id: string;
   period_id: string;
   parameter_id: string;
   value_annual: number | null;
@@ -67,6 +54,7 @@ export interface DataPoint {
 
 export interface Formula {
   id: string;
+  org_id: string;
   output_param_id: string;
   expression: string;
   expression_human: string | null;
@@ -79,6 +67,7 @@ export interface Formula {
 
 export interface CalculatedMetric {
   id: string;
+  org_id: string;
   period_id: string;
   parameter_id: string;
   formula_id: string;
@@ -93,16 +82,30 @@ export interface CalculatedMetric {
 
 // View row
 export interface CurrentMetricRow {
+  org_id: string;
   period_id: string;
   period_code: string;
   parameter_id: string;
   parameter_code: string;
   display_name: string;
   unit: string;
-  section: ParamSection;
+  section: string;
   vsme_cell: string | null;
   value: number | null;
   trace: CalculatedMetric["trace"];
   is_stale: boolean;
   computed_at: string;
+}
+
+// Provenance row for an uploaded document (extraction_documents table).
+export interface ExtractionDocument {
+  id: string;
+  org_id: string;
+  period_id: string | null;
+  storage_path: string;
+  filename: string;
+  mime_type: string;
+  status: "pending" | "committed" | "failed";
+  proposal: unknown | null;
+  created_at: string;
 }

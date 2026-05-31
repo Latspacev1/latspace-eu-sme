@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { Block, Proposal, QualitativeDoc } from "@/lib/reporting/qualitative/types";
+import { readNdjson } from "@/lib/ndjson";
 import { Check, ChevronLeft, ChevronRight, Send, X } from "./icons";
 
 // Resizable, collapsible AI Assistant pane. Width + collapsed state are
@@ -1042,45 +1043,6 @@ function SourcesList({ sources }: { sources: RetrievedSource[] }) {
       </ul>
     </details>
   );
-}
-
-// Reads an NDJSON streaming response and dispatches each line as soon as it
-// arrives. The /api/chat and /api/write routes emit one JSON object per line
-// (text deltas, activity, sources, errors), so each `onEvent` callback fires
-// progressively rather than all at once at the end.
-async function readNdjson(
-  res: Response,
-  onEvent: (ev: { event: string; data: unknown }) => void
-): Promise<void> {
-  if (!res.body) return;
-  const reader = res.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
-  // eslint-disable-next-line no-constant-condition
-  while (true) {
-    const { value, done } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    let nl = buffer.indexOf("\n");
-    while (nl !== -1) {
-      const line = buffer.slice(0, nl).trim();
-      buffer = buffer.slice(nl + 1);
-      if (line) {
-        try {
-          onEvent(JSON.parse(line));
-        } catch {
-          // Skip malformed lines rather than aborting the whole stream.
-        }
-      }
-      nl = buffer.indexOf("\n");
-    }
-  }
-  const tail = buffer.trim();
-  if (tail) {
-    try {
-      onEvent(JSON.parse(tail));
-    } catch {}
-  }
 }
 
 export function CollapsedAssistantRail({ onExpand }: { onExpand: () => void }) {

@@ -24,18 +24,21 @@ export interface DashboardCatalogue {
   periods: { code: string; label: string; is_current: boolean }[];
 }
 
-let cached: { at: number; value: DashboardCatalogue } | null = null;
+// Per-org cache. A single shared variable would leak one org's catalogue to
+// another, so we key by org_id.
+const cache = new Map<string, { at: number; value: DashboardCatalogue }>();
 const CACHE_TTL_MS = 5 * 60 * 1000;
 
-export async function loadCatalogue(opts: { fresh?: boolean } = {}): Promise<DashboardCatalogue> {
-  if (!opts.fresh && cached && Date.now() - cached.at < CACHE_TTL_MS) {
-    return cached.value;
+export async function loadCatalogue(orgId: string, opts: { fresh?: boolean } = {}): Promise<DashboardCatalogue> {
+  const hit = cache.get(orgId);
+  if (!opts.fresh && hit && Date.now() - hit.at < CACHE_TTL_MS) {
+    return hit.value;
   }
 
   const supabase = getSupabaseServiceClient();
   const [{ data: paramsData, error: pErr }, { data: periodsData, error: rErr }] = await Promise.all([
-    supabase.from("parameters").select("code, display_name, unit, section, vsme_cell, is_monthly, is_calculated").order("display_order"),
-    supabase.from("reporting_periods").select("code, label, is_current").order("start_date", { ascending: false }),
+    supabase.from("parameters").select("code, display_name, unit, section, vsme_cell, is_monthly, is_calculated").eq("org_id", orgId).order("display_order"),
+    supabase.from("reporting_periods").select("code, label, is_current").eq("org_id", orgId).order("start_date", { ascending: false }),
   ]);
   if (pErr) throw new Error(`catalogue parameters: ${pErr.message}`);
   if (rErr) throw new Error(`catalogue periods: ${rErr.message}`);
@@ -44,7 +47,7 @@ export async function loadCatalogue(opts: { fresh?: boolean } = {}): Promise<Das
     parameters: (paramsData ?? []) as CatalogueRow[],
     periods: (periodsData ?? []) as Pick<ReportingPeriod, "code" | "label" | "is_current">[],
   };
-  cached = { at: Date.now(), value };
+  cache.set(orgId, { at: Date.now(), value });
   return value;
 }
 

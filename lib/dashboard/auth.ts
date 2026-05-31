@@ -26,3 +26,14 @@ export function resolveUserId(req: Request): string {
   if (headerUser) return headerUser;
   return DEMO_USER.user_id;
 }
+
+// Resolve the calling org_id for data-scoped routes (metrics, extract,
+// dashboard, reporting). This is the single seam for tenancy: today it reads an
+// interim `X-Org-Id` header and otherwise derives a stable per-user org so
+// single-tenant dev keeps working. Swap the body for a real JWT org-claim
+// decode when proper auth lands — every route already calls through here.
+export function resolveOrgId(req: Request): string {
+  const headerOrg = req.headers.get("x-org-id");
+  if (headerOrg) return headerOrg;
+  return `org-${resolveUserId(req)}`;
+}

@@ -9,6 +9,7 @@
 import { tool, createSdkMcpServer, type SdkMcpToolDefinition } from "@anthropic-ai/claude-agent-sdk";
 import { z } from "zod";
 import { search, type Framework, type RetrievedChunk } from "../retrieval.ts";
+import { ALLOWED_SECTIONS } from "./param-sections.ts";
 
 export interface RetrievedSource {
   section: string;
@@ -28,6 +29,36 @@ export interface ProposalBlocks {
   rationale: string;
 }
 
+// ── Extraction proposal contract (extract mode) ──────────────────────────────
+// Mirrored app-side by the /api/extract/commit validator. The agent calls
+// propose_extraction exactly once with this shape.
+export interface ProposedParameter {
+  code: string;
+  display_name: string;
+  unit: string;
+  category: "input" | "emission_factor" | "output";
+  section: string;
+  is_monthly: boolean;
+  is_calculated: boolean;
+}
+
+export interface ProposedDataPoint {
+  parameter_code: string;
+  value_annual: number | null;
+  values_monthly: (number | null)[] | null;
+  source_file: string;
+  source_excerpt: string;
+  source_page?: number;
+  confidence?: number;
+}
+
+export interface ExtractionProposal {
+  period: { code: string; label: string; start_date?: string; end_date?: string };
+  parameters: ProposedParameter[];
+  data_points: ProposedDataPoint[];
+  notes?: string;
+}
+
 interface AgentMcpOptions {
   // Called once per `search_guidance` invocation with the surfaced sources, so
   // the runner can stream them to the client as a `retrieved` NDJSON event.
@@ -37,6 +68,9 @@ interface AgentMcpOptions {
   // onProposal for the runner to emit as a `proposal` NDJSON event.
   outlineIds?: Set<string>;
   onProposal?: (proposal: ProposalBlocks) => void;
+  // Extract mode only. When provided, the propose_extraction tool is
+  // registered and forwards the proposal for the runner to emit.
+  onExtraction?: (proposal: ExtractionProposal) => void;
 }
 
 // Per-framework descriptors used to build the `search_guidance` tool's
@@ -207,6 +241,74 @@ export function createAgentMcpServer(framework: Framework, opts: AgentMcpOptions
     tools.push(proposeInsert);
   }
 
+  if (opts.onExtraction) {
+    const onExtraction = opts.onExtraction;
+
+    const proposedParameter = z.object({
+      code: z.string().min(1).describe("snake_case identifier, e.g. 'electricity_kwh'. Reuse an existing code verbatim when the metric already exists."),
+      display_name: z.string().min(1),
+      unit: z.string().describe("e.g. 'kWh', 'm3', 'tCO2e', '%'. Empty string if unitless."),
+      category: z.enum(["input", "emission_factor", "output"]),
+      section: z.enum(ALLOWED_SECTIONS).describe("Pick the closest section from the allowed list; use 'other' only if nothing fits."),
+      is_monthly: z.boolean().describe("true only if you have a value per month (a 12-length array)."),
+      is_calculated: z.boolean().describe("true only if this is derived by a formula rather than read from the document."),
+    });
+
+    const proposedDataPoint = z.object({
+      parameter_code: z.string().min(1).describe("Must match a parameter's code (proposed here or an existing one)."),
+      value_annual: z.number().nullable().describe("The single annual value, or null when only monthly values exist."),
+      values_monthly: z.array(z.number().nullable()).length(12).nullable().describe("Jan..Dec, exactly 12 entries, or null when annual-only."),
+      source_file: z.string().describe("The document filename this value came from."),
+      source_excerpt: z.string().min(1).describe("Verbatim text from the document supporting this value. Never paraphrase."),
+      source_page: z.number().int().optional().describe("1-based page number where the value appears."),
+      confidence: z.number().min(0).max(1).optional(),
+    });
+
+    const proposeExtraction = tool(
+      "propose_extraction",
+      "Submit the metrics you extracted from the document. Call this EXACTLY ONCE, at the end, after you have read the whole document. Every data point must cite a verbatim source_excerpt. Never invent values that are not present in the document.",
+      {
+        period: z.object({
+          code: z.string().min(1).describe("Short period code, e.g. 'FY2025' or '2025-03'."),
+          label: z.string().min(1).describe("Human label, e.g. 'Fiscal Year 2025'."),
+          start_date: z.string().optional().describe("ISO date if determinable."),
+          end_date: z.string().optional(),
+        }),
+        parameters: z.array(proposedParameter).describe("Every distinct metric found. Reuse existing codes; do not duplicate."),
+        data_points: z.array(proposedDataPoint).describe("One per parameter per period, with provenance."),
+        notes: z.string().optional().describe("Anything ambiguous the reviewer should know."),
+      },
+      async (args) => {
+        const codes = new Set(args.parameters.map((p) => p.code));
+        const orphans = args.data_points
+          .map((d) => d.parameter_code)
+          .filter((c) => !codes.has(c));
+        // Orphans are allowed only if they reference an existing org parameter —
+        // we can't verify that here, so warn rather than reject. The app-side
+        // commit route re-validates against the org catalogue.
+        onExtraction({
+          period: args.period,
+          parameters: args.parameters,
+          data_points: args.data_points,
+          notes: args.notes,
+        });
+        const warn = orphans.length
+          ? ` Note: ${orphans.length} data point(s) reference codes not in the parameters list — make sure those are existing parameters.`
+          : "";
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: `Extraction proposal accepted (${args.parameters.length} parameters, ${args.data_points.length} data points). The user will review it.${warn}`,
+            },
+          ],
+        };
+      }
+    );
+
+    tools.push(proposeExtraction);
+  }
+
   return createSdkMcpServer({
     name: framework,
     version: "1.0.0",
@@ -221,4 +323,7 @@ export function toolSearchGuidance(framework: Framework): string {
 }
 export function toolProposeInsert(framework: Framework): string {
   return `mcp__${framework}__propose_insert`;
+}
+export function toolProposeExtraction(framework: Framework): string {
+  return `mcp__${framework}__propose_extraction`;
 }

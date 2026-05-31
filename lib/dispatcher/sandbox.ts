@@ -98,6 +98,11 @@ function getNetworkPolicy() {
       // Wildcard covers all public Blob stores; harmless if we don't use
       // others.
       "*.public.blob.vercel-storage.com",
+      // Extract mode fetches the uploaded document from a short-TTL Supabase
+      // Storage signed URL. Under the default-deny firewall this host must be
+      // allowed or the fetch (and DNS) fails. Only the signed URL crosses into
+      // the sandbox — never the service key.
+      "*.supabase.co",
     ],
   };
 }

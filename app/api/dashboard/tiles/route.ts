@@ -10,7 +10,7 @@ import { ChartSpecSchema } from "@/lib/dashboard/chart-spec";
 import { validateSpec } from "@/lib/dashboard/validate-spec";
 import { loadCatalogue } from "@/lib/dashboard/catalogue";
 import { addTile, listTiles } from "@/lib/dashboard/tiles-repo";
-import { resolveUserId } from "@/lib/dashboard/auth";
+import { resolveUserId, resolveOrgId } from "@/lib/dashboard/auth";
 
 export const runtime = "nodejs";
 
@@ -26,6 +26,7 @@ export async function GET(req: Request) {
 
 export async function POST(req: Request) {
   const userId = resolveUserId(req);
+  const orgId = resolveOrgId(req);
   let body: unknown;
   try {
     body = await req.json();
@@ -37,7 +38,7 @@ export async function POST(req: Request) {
   if (!parsed.success) {
     return NextResponse.json({ error: "Invalid spec", issues: parsed.error.issues }, { status: 400 });
   }
-  const cat = await loadCatalogue();
+  const cat = await loadCatalogue(orgId);
   const verdict = validateSpec(parsed.data, cat);
   if (!verdict.ok) {
     return NextResponse.json({ error: verdict.reason }, { status: 400 });

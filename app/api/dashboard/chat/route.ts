@@ -21,6 +21,7 @@ import { loadCatalogue, catalogueToPrompt } from "@/lib/dashboard/catalogue";
 import { ChartSpecSchema } from "@/lib/dashboard/chart-spec";
 import { validateSpec } from "@/lib/dashboard/validate-spec";
 import { fetchChartData } from "@/lib/dashboard/fetch-chart-data";
+import { resolveOrgId } from "@/lib/dashboard/auth";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -71,7 +72,8 @@ export async function POST(req: Request) {
     return new Response(JSON.stringify({ error: "messages[] required" }), { status: 400 });
   }
 
-  const catalogue = await loadCatalogue();
+  const orgId = resolveOrgId(req);
+  const catalogue = await loadCatalogue(orgId);
   const cataloguePrompt = catalogueToPrompt(catalogue);
 
   // Two system blocks so the heavy catalogue text benefits from prompt
@@ -128,7 +130,7 @@ export async function POST(req: Request) {
               send({ type: "error", message: verdict.reason });
             } else {
               try {
-                const data = await fetchChartData(parsed.data);
+                const data = await fetchChartData(orgId, parsed.data);
                 send({ type: "chart", spec: parsed.data, data });
               } catch (err) {
                 send({

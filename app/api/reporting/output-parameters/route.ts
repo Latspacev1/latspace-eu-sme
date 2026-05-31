@@ -15,6 +15,7 @@
 import { NextResponse } from "next/server";
 
 import { getSupabaseServiceClient } from "@/lib/supabase/server";
+import { resolveOrgId } from "@/lib/dashboard/auth";
 import type {
   CalculatedMetric,
   CurrentMetricRow,
@@ -80,7 +81,8 @@ function resolveUsage(framework: SupportedFramework, param: Parameter): UsedIn[]
 
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
-  const periodCode = searchParams.get("period") ?? "FY2025";
+  const periodParam = searchParams.get("period");
+  const orgId = resolveOrgId(req);
   const frameworkParam = (searchParams.get("framework") ?? "vsme").toLowerCase();
   if (frameworkParam !== "vsme" && frameworkParam !== "cdp") {
     return NextResponse.json(
@@ -92,18 +94,18 @@ export async function GET(req: Request) {
 
   const supabase = getSupabaseServiceClient();
 
-  // Resolve period
-  const { data: period, error: pErr } = await supabase
-    .from("reporting_periods")
-    .select("id, code, label, status")
-    .eq("code", periodCode)
-    .maybeSingle();
+  // Resolve period within the org. Default to the org's current period instead
+  // of a hardcoded fiscal year.
+  const periodQuery =
+    periodParam && periodParam !== "current"
+      ? supabase.from("reporting_periods").select("id, code, label, status").eq("org_id", orgId).eq("code", periodParam).maybeSingle()
+      : supabase.from("reporting_periods").select("id, code, label, status").eq("org_id", orgId).eq("is_current", true).maybeSingle();
+  const { data: period, error: pErr } = await periodQuery;
   if (pErr) return NextResponse.json({ error: pErr.message }, { status: 500 });
   if (!period) {
-    return NextResponse.json(
-      { error: `Period ${periodCode} not found` },
-      { status: 404 },
-    );
+    // No data yet for this org — return an empty registry rather than 404 so
+    // the Requirements tab renders its empty state.
+    return NextResponse.json({ period: null, framework, rows: [] });
   }
 
   // Pull output parameters, ordered by display_order so the table reads
@@ -111,6 +113,7 @@ export async function GET(req: Request) {
   const { data: paramRows, error: paramErr } = await supabase
     .from("parameters")
     .select("*")
+    .eq("org_id", orgId)
     .eq("category", "output")
     .order("display_order");
   if (paramErr) return NextResponse.json({ error: paramErr.message }, { status: 500 });
@@ -122,15 +125,18 @@ export async function GET(req: Request) {
     supabase
       .from("v_current_metrics")
       .select("*")
+      .eq("org_id", orgId)
       .eq("period_id", period.id),
     supabase
       .from("formulas")
       .select("*")
+      .eq("org_id", orgId)
       .eq("is_active", true)
       .in("output_param_id", paramIds.length ? paramIds : ["__none__"]),
     supabase
       .from("calculated_metrics")
       .select("parameter_id, formula_id, trace, computed_at, is_stale, value")
+      .eq("org_id", orgId)
       .eq("period_id", period.id),
   ]);
   if (metricsRes.error) return NextResponse.json({ error: metricsRes.error.message }, { status: 500 });

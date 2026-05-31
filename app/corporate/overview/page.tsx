@@ -1,7 +1,7 @@
 "use client";
 
-import { VsmeOverview } from "./VsmeOverview";
+import { CatalogueOverview } from "@/components/corporate/overview/CatalogueOverview";
 
 export default function OverviewPage() {
-  return <VsmeOverview />;
+  return <CatalogueOverview />;
 }

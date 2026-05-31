@@ -12,6 +12,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ChevronLeft, Search } from "@/components/reporting/qualitative/icons";
+import { dashboardFetch } from "@/lib/dashboard/client-fetch";
 
 interface UsedIn {
   framework_id: "vsme" | "cdp";
@@ -45,7 +46,8 @@ interface RequirementRow {
 }
 
 interface ApiResponse {
-  period: { code: string; label: string; status: string };
+  // null when the org has no reporting period yet — the tab shows an empty state.
+  period: { code: string; label: string; status: string } | null;
   framework: "vsme" | "cdp";
   rows: RequirementRow[];
 }
@@ -68,7 +70,9 @@ interface Props {
   onSelectionChange?: (code: string | null) => void;
 }
 
-const PERIOD = "FY2025";
+// The org's current period is resolved server-side; the client asks for
+// "current" rather than pinning a fiscal year.
+const PERIOD = "current";
 
 function apiFrameworkFor(frameworkId: Props["frameworkId"]): "cdp" | "vsme" {
   return frameworkId === "cdp" ? "cdp" : "vsme";
@@ -126,7 +130,7 @@ export function OutputParametersTab({
   const query = useQuery<ApiResponse>({
     queryKey: ["output-parameters", apiFramework, PERIOD],
     queryFn: async () => {
-      const res = await fetch(
+      const res = await dashboardFetch(
         `/api/reporting/output-parameters?period=${PERIOD}&framework=${apiFramework}`,
       );
       if (!res.ok) {
@@ -171,11 +175,11 @@ export function OutputParametersTab({
     );
   }
 
-  if (selected) {
+  if (selected && query.data?.period) {
     return (
       <RequirementDetail
         row={selected}
-        period={query.data!.period}
+        period={query.data.period}
         onBack={() => setSelectedCode(null)}
         onOpenQuestion={onOpenQuestion}
       />
@@ -198,7 +202,7 @@ export function OutputParametersTab({
           <span>
             {filtered.length} of {rows.length}
           </span>
-          {query.data && (
+          {query.data?.period && (
             <span className="inline-flex items-center gap-1.5 border border-slate-200 px-2 py-0.5">
               <span className="font-medium text-slate-600">Period</span>
               {query.data.period.label}
@@ -288,7 +292,7 @@ function RequirementDetail({
   onOpenQuestion,
 }: {
   row: RequirementRow;
-  period: ApiResponse["period"];
+  period: NonNullable<ApiResponse["period"]>;
   onBack: () => void;
   onOpenQuestion?: (questionId: string) => void;
 }) {

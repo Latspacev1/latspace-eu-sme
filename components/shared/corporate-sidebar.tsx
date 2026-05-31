@@ -18,6 +18,7 @@ import {
   ChevronUp,
   FileEdit,
   Users,
+  Upload,
 } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
@@ -38,6 +39,7 @@ const navItems: NavItem[] = [
     label: "Data Collection",
     icon: FileEdit,
     children: [
+      { href: "/corporate/extract", label: "Upload data", icon: Upload },
       { href: "/approvals", label: "Logbook", icon: ClipboardCheck },
     ],
   },

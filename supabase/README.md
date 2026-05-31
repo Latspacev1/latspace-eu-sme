@@ -1,38 +1,39 @@
-# ChainCraft VSME — Supabase setup
+# Supabase setup — metrics & document-extraction platform
 
-End-to-end Supabase backing for the VSME (ChainCraft) dashboard. Single-tenant
-schema, monthly arrays first-class, formulas stored as data and re-evaluated by
-a tiny TS engine on demand.
+End-to-end Supabase backing for the metrics dashboard and the document-extraction
+pipeline. Multi-tenant (org-scoped), monthly arrays first-class, formulas stored
+as data and re-evaluated by a tiny TS engine on demand. App-level scoping via the
+service-role client; RLS is the inert `auth.role()` gate.
 
 ## File layout
 
 ```
 supabase/
 ├── migrations/
-│   └── 0001_chaincraft_vsme.sql        ← schema, RLS, triggers, view
-└── seed/
-    └── chaincraft_fy2025.sql           ← AUTO-GENERATED — re-run the script below
-
-scripts/
-├── generate-chaincraft-seed.mjs        ← Excel → seed SQL (re-runnable)
-└── test-evaluator.mjs                  ← smoke-tests the evaluator vs Excel
+│   ├── 0001_chaincraft_vsme.sql        ← original schema, RLS, triggers, view
+│   ├── 0002_renewable_share.sql        ← (applied) seeded a derived metric
+│   ├── 0003_ai_dashboard.sql           ← dashboards + dashboard_tiles
+│   └── 0004_genericize_org_scoping.sql ← org_id scoping, free-text section,
+│                                         extraction_documents, documents bucket
 
 lib/
 ├── supabase/
 │   ├── client.ts                       ← browser client (anon key)
 │   ├── server.ts                       ← server + service-role clients
 │   └── types.ts                        ← TS types mirroring the schema
-└── chaincraft/
+└── metrics/
     ├── evaluator.ts                    ← arithmetic eval + topo sort
-    └── recalculate.ts                  ← orchestrates a full period recalc
+    ├── recalculate.ts                  ← orchestrates a full org+period recalc
+    └── param-sections.ts              ← allowed `section` list (shared contract)
 
-app/api/chaincraft/
-├── metrics/route.ts                    ← GET — dashboard reads this
-└── recalculate/route.ts                ← POST — rerun all formulas
+app/api/metrics/
+├── route.ts                            ← GET — dashboard reads this
+├── recalculate/route.ts                ← POST — rerun all formulas (org+period)
+└── timeseries/route.ts                 ← GET — monthly series
 
-app/corporate/overview/
-├── page.tsx                            ← branches on org → VSME or cement view
-└── VsmeOverview.tsx                    ← VSME KPI tiles dashboard
+app/api/extract/
+├── route.ts                            ← POST — upload + dispatch extract agent
+└── commit/route.ts                     ← POST — persist reviewed proposal
 
 components/vsme/
 ├── KpiTile.tsx                         ← tile with click-through trace popover
@@ -42,100 +43,62 @@ components/vsme/
 ## Setup
 
 ### 1. Create a Supabase project
-- Go to https://supabase.com → New project. Pick the EU region (Frankfurt) to
-  keep ChainCraft's data in the EU.
-- Copy three values from **Project Settings → API**:
+- New project (EU region recommended). Copy from **Project Settings → API**:
   - `Project URL`            → `NEXT_PUBLIC_SUPABASE_URL`
   - `anon public` key        → `NEXT_PUBLIC_SUPABASE_ANON_KEY`
   - `service_role secret` key → `SUPABASE_SERVICE_ROLE_KEY` (server only!)
 
 Paste them into `.env.local` (copy from `.env.local.example`).
 
-### 2. Run the migration
-- **SQL Editor**: paste the contents of `supabase/migrations/0001_chaincraft_vsme.sql` and run.
-- **Or via Supabase CLI** (`brew install supabase/tap/supabase`):
-  ```bash
-  supabase link --project-ref <ref>
-  supabase db push
-  ```
+### 2. Run the migrations
+In the SQL Editor, run `0001` → `0002` → `0003` → `0004` in order (or
+`supabase db push` via the CLI). `0004` truncates the legacy single-tenant data,
+makes everything org-scoped, and creates the private `documents` Storage bucket.
 
-### 3. Generate + load the seed
-```bash
-# Regenerate seed SQL from the Excel (idempotent)
-node scripts/generate-chaincraft-seed.mjs \
-  --excel "C:/Users/ishan/Downloads/Chaincraft/Chaincraft/ChainCraft VSME/ChainCraft_VSME_Input_Output_FY2025.xlsx" \
-  --out supabase/seed/chaincraft_fy2025.sql
+There is **no seed** — data arrives through the extraction pipeline.
 
-# Apply it (SQL Editor → paste, run)
-# Result: 1 period, 146 parameters, 81 data_points, 63 formulas
-```
-
-### 4. Compute all metrics
-First-time, hit the recalculate endpoint to populate `calculated_metrics`:
-```bash
-curl -X POST http://localhost:3000/api/chaincraft/recalculate \
-  -H 'Content-Type: application/json' \
-  -d '{"period":"FY2025"}'
-```
-After that, the trigger `data_points_mark_stale` will flag affected metrics
-whenever an input changes; the dashboard's **Recalculate** button re-runs the
-evaluator and clears the stale flag.
-
-### 5. Flip the dashboard to VSME mode
-For ChainCraft (single-tenant), either:
-- Set `NEXT_PUBLIC_DASHBOARD_PROFILE=vsme` in `.env.local`, **or**
-- Make sure the org name returned by `/api/organizations/:id` contains
-  "ChainCraft" or "VSME" — the branch in `app/corporate/overview/page.tsx`
-  checks both.
-
-Visit `/corporate/overview` → you'll see the VSME KPI tiles.
+### 3. Use the app
+1. Sign in, then go to **Data Collection → Upload data** (`/corporate/extract`).
+2. Drop a utility bill / invoice / PDF. The agent reads it (Claude vision — no
+   separate OCR), proposes parameters + data points with verbatim provenance.
+3. Review and edit the proposal, then **Confirm & save** — rows land in
+   `parameters` / `data_points` (org-scoped) and the `data_points_mark_stale`
+   trigger flags dependent metrics.
+4. `POST /api/metrics/recalculate` (the overview's **Recalculate** button)
+   evaluates formulas into `calculated_metrics`.
+5. The overview, AI dashboard charts, and the reporting Requirements tab all
+   read the org-scoped data automatically.
 
 ## How it fits together
 
 ```
-Excel  ──(generate-chaincraft-seed.mjs)──▶  seed SQL  ──▶  Supabase
-                                                              │
-        ┌─────────────────────────────────────────────────────┤
-        ▼                                                     ▼
-  data_points (raw)                                       formulas
-        │                                                     │
-        └──────────▶  recalculate.ts (topo sort + eval) ◀─────┘
+Document ──▶ /api/extract ──▶ Storage (documents bucket) + signed URL
+                  │
+                  ▼
+        agent-runner (extract mode, Claude vision)
+                  │ propose_extraction
+                  ▼
+        ProposalReview (user edits) ──▶ /api/extract/commit
+                                              │
+        ┌─────────────────────────────────────┤
+        ▼                                     ▼
+  data_points (raw, org-scoped)            formulas
+        │                                     │
+        └──────────▶ recalculate.ts (topo sort + eval) ◀───┘
                               │
                               ▼
-                     calculated_metrics  ──▶  /api/chaincraft/metrics
-                                                     │
-                                                     ▼
-                                          VsmeOverview (KPI tiles)
+                     calculated_metrics ──▶ /api/metrics ──▶ overview / charts
 ```
 
-## Editing inputs
+## Org scoping
 
-Today the dashboard is read-only. To wire data entry:
-
-1. New page `app/(reporting)/inputs/page.tsx` — table of all parameters with
-   `category = 'input'`, grouped by section. Each row → text input (annual)
-   or 12 inputs (monthly).
-2. POST to `/api/chaincraft/data-points` (not built yet) → upsert into
-   `data_points`. The DB trigger marks dependent metrics stale.
-3. The dashboard's "Recalculate" button (already wired) rebuilds them.
+`resolveOrgId(req)` in `lib/dashboard/auth.ts` is the single tenancy seam. Today
+it reads an interim `X-Org-Id` header (attached client-side by `dashboardFetch`)
+and falls back to a per-user org. Swap its body for a real JWT org-claim decode
+when proper auth lands — every data route already calls through it.
 
 ## When formulas change
 
-If you need to amend a methodology (e.g. grid EF source switches from RVO to
-DEFRA):
-
-1. Either update the row directly in `parameters` / `formulas`, or
-2. Insert a new `formulas` row with `version = old + 1`, then
-   `update formulas set is_active = false where output_param_id = X and version = old`
-   to retire the old one. The trigger marks the metric stale; recalc fills it in.
-
-## Verifying parity with the Excel
-
-```bash
-node scripts/test-evaluator.mjs
-# → PASS: 39 NEAR (within 5%): 1 FAIL: 1
-```
-The one residual "FAIL" (`scope1_ng_ch4`) compares the evaluator's output
-against the "Per Final VSME Report" column, which in two rows differs from
-the Excel's *own* formula result by sub-percent (filed report rounding).
-The evaluator matches Excel's formula result exactly on every metric.
+Update the `parameters` / `formulas` rows for the org (or insert a new `formulas`
+row with `version = old + 1` and retire the old one). The trigger marks the
+metric stale; recalc fills it in.

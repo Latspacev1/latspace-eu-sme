@@ -1,6 +1,6 @@
-// Recalculate all ChainCraft VSME metrics for a given period.
-// Loads all parameters/data_points/formulas, topologically sorts, evaluates,
-// and writes results (with trace) into calculated_metrics.
+// Recalculate all stored metrics for one org + period.
+// Loads that org's parameters/data_points/formulas, topologically sorts,
+// evaluates, and writes results (with trace) into calculated_metrics.
 
 import { getSupabaseServiceClient } from "@/lib/supabase/server";
 import { evaluate, topoSortFormulas, type ParamValues } from "./evaluator";
@@ -13,7 +13,7 @@ export interface RecalcResult {
   duration_ms: number;
 }
 
-export async function recalculatePeriod(periodCode: string): Promise<RecalcResult> {
+export async function recalculatePeriod(orgId: string, periodCode: string): Promise<RecalcResult> {
   const start = Date.now();
   const supabase = getSupabaseServiceClient();
   const errors: RecalcResult["errors"] = [];
@@ -22,15 +22,16 @@ export async function recalculatePeriod(periodCode: string): Promise<RecalcResul
   const { data: period, error: pErr } = await supabase
     .from("reporting_periods")
     .select("*")
+    .eq("org_id", orgId)
     .eq("code", periodCode)
     .single();
   if (pErr || !period) throw new Error(`No reporting period ${periodCode}: ${pErr?.message}`);
 
-  // 2. Load parameters, data points, active formulas
+  // 2. Load parameters, data points, active formulas (all org-scoped)
   const [{ data: parameters }, { data: dataPoints }, { data: formulas }] = await Promise.all([
-    supabase.from("parameters").select("*").order("display_order"),
-    supabase.from("data_points").select("*").eq("period_id", period.id),
-    supabase.from("formulas").select("*").eq("is_active", true),
+    supabase.from("parameters").select("*").eq("org_id", orgId).order("display_order"),
+    supabase.from("data_points").select("*").eq("org_id", orgId).eq("period_id", period.id),
+    supabase.from("formulas").select("*").eq("org_id", orgId).eq("is_active", true),
   ]);
   if (!parameters || !dataPoints || !formulas) {
     throw new Error("Failed to load parameters/data_points/formulas");
@@ -70,6 +71,7 @@ export async function recalculatePeriod(periodCode: string): Promise<RecalcResul
 
   // 5. Evaluate each formula, write to calculated_metrics
   const upserts: {
+    org_id: string;
     period_id: string;
     parameter_id: string;
     formula_id: string;
@@ -85,6 +87,7 @@ export async function recalculatePeriod(periodCode: string): Promise<RecalcResul
       const { value, trace } = evaluate(f.expression, values);
       values[f.code] = value;
       upserts.push({
+        org_id: orgId,
         period_id: period.id,
         parameter_id: f.output_param_id,
         formula_id: f.id,
@@ -102,7 +105,7 @@ export async function recalculatePeriod(periodCode: string): Promise<RecalcResul
   if (upserts.length) {
     const { error: upErr } = await supabase
       .from("calculated_metrics")
-      .upsert(upserts, { onConflict: "period_id,parameter_id" });
+      .upsert(upserts, { onConflict: "org_id,period_id,parameter_id" });
     if (upErr) throw new Error(`calculated_metrics upsert failed: ${upErr.message}`);
   }
 

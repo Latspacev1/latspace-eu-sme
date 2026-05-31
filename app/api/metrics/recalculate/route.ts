@@ -1,13 +1,16 @@
-// POST /api/chaincraft/recalculate
-// Body: { period?: "FY2025" }  (defaults to the current period)
-// Triggers a full re-evaluation of all formulas for the period and writes
-// results into calculated_metrics.
+// POST /api/metrics/recalculate
+// Body: { period?: "FY2025" }  (defaults to the org's current period)
+// Triggers a full re-evaluation of all formulas for the org + period and
+// writes results into calculated_metrics. Replaces /api/chaincraft/recalculate.
 
 import { NextResponse } from "next/server";
 import { getSupabaseServiceClient } from "@/lib/supabase/server";
-import { recalculatePeriod } from "@/lib/chaincraft/recalculate";
+import { resolveOrgId } from "@/lib/dashboard/auth";
+import { recalculatePeriod } from "@/lib/metrics/recalculate";
 
 export async function POST(req: Request) {
+  const orgId = resolveOrgId(req);
+
   let body: { period?: string } = {};
   try {
     body = (await req.json()) as { period?: string };
@@ -16,11 +19,12 @@ export async function POST(req: Request) {
   }
 
   let periodCode = body.period;
-  if (!periodCode) {
+  if (!periodCode || periodCode === "current") {
     const supabase = getSupabaseServiceClient();
     const { data, error } = await supabase
       .from("reporting_periods")
       .select("code")
+      .eq("org_id", orgId)
       .eq("is_current", true)
       .maybeSingle();
     if (error) {
@@ -40,7 +44,7 @@ export async function POST(req: Request) {
   }
 
   try {
-    const result = await recalculatePeriod(periodCode);
+    const result = await recalculatePeriod(orgId, periodCode);
     return NextResponse.json(result);
   } catch (e) {
     return NextResponse.json({ error: (e as Error).message }, { status: 500 });
