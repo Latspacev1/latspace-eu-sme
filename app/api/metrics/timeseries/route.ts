@@ -15,7 +15,8 @@ import type { Parameter, DataPoint, Formula } from "@/lib/supabase/types";
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
   const periodParam = searchParams.get("period");
-  const orgId = resolveOrgId(req);
+  const orgId = await resolveOrgId(req);
+  if (!orgId) return NextResponse.json({ success: false, message: "Not authenticated" }, { status: 401 });
 
   const supabase = getSupabaseServiceClient();
 

@@ -42,6 +42,10 @@
   --color-ccts-accent: var(--ccts-accent);
   --color-ccts-white: var(--ccts-white);
   --color-ccts-black: var(--ccts-black);
+  /* `brand` alias used by the document-extraction UI (components/extract/*,
+     app/corporate/extract). Maps to the primary teal so bg-brand/text-brand/
+     border-brand resolve instead of rendering invisible. */
+  --color-brand: var(--ccts-primary);
   --radius-sm: 0px;
   --radius-md: 0px;
   --radius-lg: 0px;

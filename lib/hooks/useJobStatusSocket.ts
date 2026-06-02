@@ -48,7 +48,6 @@ export function useJobStatusSocket(options: JobStatusSocketOptions = {}) {
   );
 
   return useNotificationSocket({
-    showToasts: false,
     onMessage: handleMessage,
   });
 }

@@ -1,7 +1,6 @@
 // frontend/lib/api/reporting.ts
 /**
  * API client for reporting module endpoints.
- * Follows the pattern of lib/api/benchmarking.ts.
  */
 import { apiClient, type APIResponse } from "./client";
 
@@ -28,7 +27,6 @@ export interface SectionState {
   section_id: string;
   status: "not_started" | "in_progress" | "completed";
   values: Record<string, unknown>;
-  assignees: string[];
   comment: string;
   last_synced_at: string | null;
   autofill_confidence: number | null;
@@ -135,17 +133,6 @@ export const reportingApi = {
   > {
     return apiClient.get<{ autofill_job_id: string | null; last_autofilled_at: string | null }>(
       `/api/reporting/instances/${instanceId}/autofill/status`,
-    );
-  },
-
-  patchSectionAssignees(
-    instanceId: string,
-    sectionId: string,
-    userIds: string[],
-  ): Promise<APIResponse<{ progress_pct: number }>> {
-    return apiClient.patch<{ progress_pct: number }>(
-      `/api/reporting/instances/${instanceId}/sections/${sectionId}/assignees`,
-      { user_ids: userIds },
     );
   },
 };

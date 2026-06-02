@@ -72,7 +72,8 @@ export async function POST(req: Request) {
     return new Response(JSON.stringify({ error: "messages[] required" }), { status: 400 });
   }
 
-  const orgId = resolveOrgId(req);
+  const orgId = await resolveOrgId(req);
+  if (!orgId) return new Response(JSON.stringify({ success: false, message: "Not authenticated" }), { status: 401 });
   const catalogue = await loadCatalogue(orgId);
   const cataloguePrompt = catalogueToPrompt(catalogue);
 

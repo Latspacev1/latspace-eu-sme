@@ -99,3 +99,35 @@ export async function commitExtraction(req: {
   }
   return res.json();
 }
+
+export interface RecordedParameter {
+  code: string;
+  display_name: string;
+  unit: string;
+  category: string;
+  section: string;
+}
+
+export interface ExtractionDocumentSummary {
+  id: string;
+  filename: string;
+  mime_type: string;
+  status: "pending" | "committed" | "failed";
+  created_at: string;
+  period_code: string | null;
+  parameters: RecordedParameter[];
+}
+
+export async function listExtractionDocuments(): Promise<ExtractionDocumentSummary[]> {
+  const res = await dashboardFetch("/api/extract/documents");
+  if (!res.ok) {
+    let msg = `HTTP ${res.status}`;
+    try {
+      const j = await res.json();
+      msg = j.error ?? msg;
+    } catch {}
+    throw new Error(msg);
+  }
+  const data = (await res.json()) as { documents?: ExtractionDocumentSummary[] };
+  return data.documents ?? [];
+}

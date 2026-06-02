@@ -16,8 +16,9 @@ export async function GET(
   req: Request,
   ctx: { params: Promise<{ id: string }> },
 ) {
-  const userId = resolveUserId(req);
-  const orgId = resolveOrgId(req);
+  const userId = await resolveUserId(req);
+  const orgId = await resolveOrgId(req);
+  if (!userId || !orgId) return NextResponse.json({ success: false, message: "Not authenticated" }, { status: 401 });
   const { id } = await ctx.params;
   try {
     const tile = await getTile(userId, id);

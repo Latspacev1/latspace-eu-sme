@@ -93,7 +93,8 @@ export function ExtractUploader({
           type="button"
           disabled={!file || disabled}
           onClick={() => file && onStart({ file, period: period.trim() || undefined, framework })}
-          className="ml-auto bg-brand px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-brand/90 disabled:cursor-not-allowed disabled:opacity-40"
+          style={{ backgroundColor: "#074D47" }}
+          className="ml-auto px-4 py-2 text-sm font-medium text-white transition-colors hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
         >
           Extract data
         </button>

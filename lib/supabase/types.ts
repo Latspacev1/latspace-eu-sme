@@ -6,6 +6,34 @@
 
 export type ParamCategory = "input" | "emission_factor" | "output";
 
+// --- Multi-tenant org schema (migration 0005, Clerk-keyed) ------------------
+// Identity is handled by Clerk; user ids are TEXT (e.g. "user_2abc..."). There
+// is no auth.users FK and no app_users mirror. See lib/auth/session.ts for the
+// runtime Membership shape used by the auth seam.
+
+export type MembershipRole = "owner" | "admin" | "member";
+
+// organizations(id uuid, name, slug, created_by text /* Clerk user id */, ...)
+// onboarding_profile (jsonb, migration 0006) holds the OnboardingProfile shape
+// from lib/types/onboarding.ts — surfaced in the AI Context page.
+export interface Organization {
+  id: string;
+  name: string;
+  slug: string | null;
+  created_by: string | null;
+  onboarding_profile: import("@/lib/types/onboarding").OnboardingProfile | null;
+  created_at: string;
+}
+
+// memberships(user_id text /* Clerk id */, org_id uuid -> organizations, role text)
+export interface Membership {
+  id: string;
+  user_id: string;
+  org_id: string;
+  role: MembershipRole;
+  created_at: string;
+}
+
 // section was an enum (param_section) in the single-tenant schema; 0004 retyped
 // it to free text so extraction can invent per-org sections. The curated VSME
 // section names still live in lib/metrics/param-sections.ts.

@@ -93,7 +93,7 @@ export function CatalogueOverview() {
               Sustainability Dashboard
             </h1>
             <p className="text-[#1F5F5B] text-sm mt-1">
-              {user?.displayName || user?.username || "Your organization"}
+              {user?.companyName || "Your organization"}
               {data?.period?.label ? ` · ${data.period.label}` : ""}
             </p>
           </div>

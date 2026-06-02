@@ -82,7 +82,8 @@ function resolveUsage(framework: SupportedFramework, param: Parameter): UsedIn[]
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
   const periodParam = searchParams.get("period");
-  const orgId = resolveOrgId(req);
+  const orgId = await resolveOrgId(req);
+  if (!orgId) return NextResponse.json({ success: false, message: "Not authenticated" }, { status: 401 });
   const frameworkParam = (searchParams.get("framework") ?? "vsme").toLowerCase();
   if (frameworkParam !== "vsme" && frameworkParam !== "cdp") {
     return NextResponse.json(

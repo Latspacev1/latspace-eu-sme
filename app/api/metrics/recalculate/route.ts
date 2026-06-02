@@ -9,7 +9,8 @@ import { resolveOrgId } from "@/lib/dashboard/auth";
 import { recalculatePeriod } from "@/lib/metrics/recalculate";
 
 export async function POST(req: Request) {
-  const orgId = resolveOrgId(req);
+  const orgId = await resolveOrgId(req);
+  if (!orgId) return NextResponse.json({ success: false, message: "Not authenticated" }, { status: 401 });
 
   let body: { period?: string } = {};
   try {

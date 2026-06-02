@@ -15,7 +15,8 @@ import { resolveUserId, resolveOrgId } from "@/lib/dashboard/auth";
 export const runtime = "nodejs";
 
 export async function GET(req: Request) {
-  const userId = resolveUserId(req);
+  const userId = await resolveUserId(req);
+  if (!userId) return NextResponse.json({ success: false, message: "Not authenticated" }, { status: 401 });
   try {
     const tiles = await listTiles(userId);
     return NextResponse.json({ tiles });
@@ -25,8 +26,9 @@ export async function GET(req: Request) {
 }
 
 export async function POST(req: Request) {
-  const userId = resolveUserId(req);
-  const orgId = resolveOrgId(req);
+  const userId = await resolveUserId(req);
+  const orgId = await resolveOrgId(req);
+  if (!userId || !orgId) return NextResponse.json({ success: false, message: "Not authenticated" }, { status: 401 });
   let body: unknown;
   try {
     body = await req.json();

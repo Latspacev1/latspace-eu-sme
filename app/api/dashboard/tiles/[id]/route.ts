@@ -22,7 +22,8 @@ export async function PATCH(
   req: Request,
   ctx: { params: Promise<{ id: string }> },
 ) {
-  const userId = resolveUserId(req);
+  const userId = await resolveUserId(req);
+  if (!userId) return NextResponse.json({ success: false, message: "Not authenticated" }, { status: 401 });
   const { id } = await ctx.params;
   let body: unknown;
   try { body = await req.json(); } catch { return NextResponse.json({ error: "Invalid JSON" }, { status: 400 }); }
@@ -42,7 +43,8 @@ export async function DELETE(
   req: Request,
   ctx: { params: Promise<{ id: string }> },
 ) {
-  const userId = resolveUserId(req);
+  const userId = await resolveUserId(req);
+  if (!userId) return NextResponse.json({ success: false, message: "Not authenticated" }, { status: 401 });
   const { id } = await ctx.params;
   try {
     await deleteTile(userId, id);

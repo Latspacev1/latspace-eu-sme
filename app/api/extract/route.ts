@@ -29,7 +29,8 @@ function ndjsonError(message: string, status = 400): Response {
 }
 
 export async function POST(req: NextRequest) {
-  const orgId = resolveOrgId(req);
+  const orgId = await resolveOrgId(req);
+  if (!orgId) return ndjsonError("Not authenticated", 401);
 
   let form: FormData;
   try {

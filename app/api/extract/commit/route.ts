@@ -54,7 +54,8 @@ interface CommitBody {
 }
 
 export async function POST(req: Request) {
-  const orgId = resolveOrgId(req);
+  const orgId = await resolveOrgId(req);
+  if (!orgId) return NextResponse.json({ success: false, message: "Not authenticated" }, { status: 401 });
 
   let body: CommitBody;
   try {

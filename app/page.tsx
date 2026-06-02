@@ -2,19 +2,22 @@
 
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { useAppStore } from "@/lib/store/useAppStore";
+import { useAuth } from "@clerk/nextjs";
 
 export default function RootPage() {
   const router = useRouter();
-  const { isAuthenticated } = useAppStore();
+  const { isLoaded, isSignedIn } = useAuth();
 
   useEffect(() => {
-    if (isAuthenticated) {
-      router.push("/corporate/overview");
+    if (!isLoaded) return;
+    // Signed-in users go to /post-auth so the server org check decides
+    // overview vs onboarding; everyone else goes to /login.
+    if (isSignedIn) {
+      router.replace("/post-auth");
     } else {
-      router.push("/login");
+      router.replace("/login");
     }
-  }, [isAuthenticated, router]);
+  }, [isLoaded, isSignedIn, router]);
 
   return null;
 }

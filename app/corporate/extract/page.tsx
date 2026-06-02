@@ -10,6 +10,7 @@ import { ExtractUploader, type UploadOptions } from "@/components/extract/Extrac
 import { ExtractActivity, type ActivityItem } from "@/components/extract/ExtractActivity";
 import { ProposalReview } from "@/components/extract/ProposalReview";
 import { DocumentPreview } from "@/components/extract/DocumentPreview";
+import { DocumentHistory } from "@/components/extract/DocumentHistory";
 import { uploadAndExtract, type ExtractionProposal } from "@/lib/api/extract";
 
 type Phase = "idle" | "running" | "review" | "done";
@@ -125,6 +126,7 @@ export default function ExtractPage() {
                   onCommitted={() => {
                     setPhase("done");
                     qc.invalidateQueries({ queryKey: ["metrics"] });
+                    qc.invalidateQueries({ queryKey: ["extraction-documents"] });
                   }}
                 />
               )}
@@ -146,6 +148,8 @@ export default function ExtractPage() {
             </div>
           </div>
         )}
+
+        <DocumentHistory />
       </div>
     </div>
   );
