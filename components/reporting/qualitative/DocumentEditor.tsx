@@ -1,6 +1,7 @@
 "use client";
 
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import type {
   Block,
   Comment,
@@ -29,6 +30,26 @@ import {
 } from "./icons";
 import { MermaidRenderer } from "./MermaidRenderer";
 
+// Output parameter rows fetched for the Requirement picker. Match the shape
+// returned by /api/reporting/output-parameters — only the fields we need.
+interface OutputParameterRow {
+  code: string;
+  display_name: string;
+  unit: string;
+  section: string;
+  value: number | null;
+}
+
+const OUTPUT_PARAM_PREFIX = "OUTPUT:";
+
+function outputParamIdFor(code: string): string {
+  return `${OUTPUT_PARAM_PREFIX}${code}`;
+}
+
+export function outputParamCodeFromId(id: string): string | null {
+  return id.startsWith(OUTPUT_PARAM_PREFIX) ? id.slice(OUTPUT_PARAM_PREFIX.length) : null;
+}
+
 interface Props {
   doc: QualitativeDoc;
   setDoc: (updater: (prev: QualitativeDoc) => QualitativeDoc) => void;
@@ -53,6 +74,22 @@ export function DocumentEditor({
   onAcceptProposal,
   onRejectProposal,
 }: Props) {
+  // Output parameters available for embedding via the Requirement button.
+  // Fetched lazily on first picker open via React Query; shares cache with
+  // the Requirements tab (`["output-parameters", "vsme", "FY2025"]`).
+  const outputParamsQuery = useQuery<{ rows: OutputParameterRow[] }>({
+    queryKey: ["output-parameters", "vsme", "FY2025"],
+    queryFn: async () => {
+      const res = await fetch(
+        `/api/reporting/output-parameters?period=FY2025&framework=vsme`,
+      );
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return res.json();
+    },
+    staleTime: 60_000,
+  });
+  const outputParams = outputParamsQuery.data?.rows ?? [];
+
   const [activeBlockId, setActiveBlockId] = useState<string | null>(null);
   const [selection, setSelection] = useState<Selection | null>(null);
   const editorRef = useRef<HTMLDivElement>(null);
@@ -236,19 +273,81 @@ export function DocumentEditor({
     return (el as HTMLElement | null)?.getBoundingClientRect() ?? null;
   }
 
+  // Insert a requirement-ref for an output parameter. We materialize the
+  // parameter as a local `Requirement` (id prefixed with OUTPUT:<code>) on
+  // first use so the existing block renderer + snapshot/stale logic can be
+  // reused unchanged. Subsequent inserts of the same parameter reuse the
+  // existing requirement record but refresh its response to the live value.
   const insertRequirementRef = useCallback(
-    (requirementId: string) => {
-      const req = doc.requirements.find((r) => r.id === requirementId);
-      const snapshot = req?.response ?? { kind: "empty" as const };
-      insertBlockAfter(activeBlockId, {
-        id: genId("b"),
-        kind: "requirement-ref",
-        requirementId,
-        snapshot,
-        snapshotAt: new Date().toISOString(),
+    (paramCode: string) => {
+      const param = outputParams.find((p) => p.code === paramCode);
+      if (!param) return;
+      const reqId = outputParamIdFor(paramCode);
+      const now = new Date().toISOString();
+      const response =
+        param.value === null
+          ? null
+          : ({ kind: "number" as const, value: param.value, unit: param.unit });
+
+      setDoc((prev) => {
+        const existing = prev.requirements.find((r) => r.id === reqId);
+        if (existing) {
+          // Refresh the live value on the requirement record so subsequent
+          // embeds carry the current snapshot, then defer the block insert.
+          return {
+            ...prev,
+            requirements: prev.requirements.map((r) =>
+              r.id === reqId
+                ? {
+                    ...r,
+                    name: param.display_name,
+                    description: `${param.code} · ${param.section}`,
+                    response,
+                    updatedAt: now,
+                  }
+                : r,
+            ),
+          };
+        }
+        return {
+          ...prev,
+          requirements: [
+            ...prev.requirements,
+            {
+              id: reqId,
+              name: param.display_name,
+              description: `${param.code} · ${param.section}`,
+              response,
+              attachments: [],
+              activity: [
+                {
+                  id: genId("a"),
+                  at: now,
+                  actor: "system",
+                  message: `Linked to output parameter ${param.code}.`,
+                },
+              ],
+              createdAt: now,
+              updatedAt: now,
+            },
+          ],
+        };
       });
+
+      // Insert the block on the next tick so the requirement is in state
+      // before the renderer looks it up.
+      const snapshot = response ?? ({ kind: "empty" as const });
+      setTimeout(() => {
+        insertBlockAfter(activeBlockId, {
+          id: genId("b"),
+          kind: "requirement-ref",
+          requirementId: reqId,
+          snapshot,
+          snapshotAt: now,
+        });
+      }, 0);
     },
-    [activeBlockId, doc.requirements, insertBlockAfter]
+    [activeBlockId, outputParams, insertBlockAfter, setDoc],
   );
 
   const insertDataRef = useCallback(
@@ -265,39 +364,6 @@ export function DocumentEditor({
       });
     },
     [activeBlockId, doc.metrics, insertBlockAfter]
-  );
-
-  const createRequirementInline = useCallback(
-    (label: string): string => {
-      const id = `REQ-${Date.now().toString(36).toUpperCase()}`;
-      setDoc((prev) => ({
-        ...prev,
-        requirements: [
-          ...prev.requirements,
-          {
-            id,
-            name: label,
-            description: "",
-            response: null,
-            attachments: [],
-            activity: [
-              {
-                id: genId("a"),
-                at: new Date().toISOString(),
-                actor: "you",
-                message: `Requirement created inline from document.`,
-              },
-            ],
-            createdAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString(),
-          },
-        ],
-      }));
-      // Defer the insert so the new requirement is in state first.
-      setTimeout(() => insertRequirementRef(id), 0);
-      return id;
-    },
-    [setDoc, insertRequirementRef]
   );
 
   const syncDocumentSnapshots = useCallback(
@@ -425,15 +491,22 @@ export function DocumentEditor({
         onClose={() => setReqPickerPos(null)}
         position={reqPickerPos ?? undefined}
         title="Insert requirement"
-        items={doc.requirements.map((r) => ({
-          id: r.id,
-          primary: `${r.id}: ${r.name}`,
-          secondary: r.description,
+        items={outputParams.map((p) => ({
+          id: p.code,
+          primary: p.display_name,
+          secondary:
+            p.value === null
+              ? `${p.code} · ${p.section}`
+              : `${p.code} · ${p.section} · ${p.value}${p.unit ? ` ${p.unit}` : ""}`,
         }))}
         onPick={insertRequirementRef}
-        onCreate={(label) => createRequirementInline(label)}
-        createLabel="Create requirement"
-        emptyLabel="No requirements yet."
+        emptyLabel={
+          outputParamsQuery.isLoading
+            ? "Loading parameters…"
+            : outputParamsQuery.error
+              ? "Couldn't load output parameters."
+              : "No output parameters available."
+        }
       />
       <PickerPopover
         open={dataPickerPos !== null}
@@ -1049,6 +1122,11 @@ function RequirementRefBlockView({
       </div>
     );
   }
+  const paramCode = outputParamCodeFromId(block.requirementId);
+  // For output-parameter-backed embeds, the header surfaces the code as a
+  // chip and the value renders in blue to signal it's a live link back to
+  // the Requirements tab. The whole block remains clickable.
+  const isParamBacked = paramCode !== null;
   return (
     <div className="my-2 border border-slate-200 bg-white">
       <button
@@ -1056,7 +1134,9 @@ function RequirementRefBlockView({
         className="flex w-full items-center gap-2 border-b border-slate-100 px-3 py-1.5 text-left text-[11px] uppercase tracking-wider text-slate-500 hover:bg-slate-50"
       >
         <RequirementIcon className="h-3.5 w-3.5 text-brand" />
-        <span className="font-medium text-slate-700">{req.id}</span>
+        <span className="font-medium text-slate-700">
+          {isParamBacked ? paramCode : req.id}
+        </span>
         <span className="truncate text-slate-500">· {req.name}</span>
         {stale && (
           <span className="ml-auto inline-flex items-center gap-1 bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-800">
@@ -1064,36 +1144,63 @@ function RequirementRefBlockView({
           </span>
         )}
       </button>
-      <div className="px-3 py-2">
-        <SnapshotView snapshot={block.snapshot} />
-        {stale && (
-          <div className="mt-2 flex items-center justify-between border border-amber-200 bg-amber-50 px-2 py-1 text-[11px] text-amber-800">
-            <span>This embed shows an older response.</span>
-            <button
-              onClick={onSyncSnapshot}
-              className="border border-amber-300 bg-white px-2 py-0.5 font-medium text-amber-800 hover:bg-amber-100"
-            >
-              Update from requirement
-            </button>
-          </div>
-        )}
-      </div>
+      <button
+        onClick={() => onOpenRequirement(block.requirementId)}
+        className="block w-full px-3 py-2 text-left hover:bg-slate-50"
+        title={isParamBacked ? "Open in Requirements tab" : undefined}
+      >
+        <SnapshotView snapshot={block.snapshot} isLink={isParamBacked} />
+      </button>
+      {stale && (
+        <div className="mx-3 mb-2 flex items-center justify-between border border-amber-200 bg-amber-50 px-2 py-1 text-[11px] text-amber-800">
+          <span>This embed shows an older response.</span>
+          <button
+            onClick={onSyncSnapshot}
+            className="border border-amber-300 bg-white px-2 py-0.5 font-medium text-amber-800 hover:bg-amber-100"
+          >
+            Update from requirement
+          </button>
+        </div>
+      )}
     </div>
   );
 }
 
-function SnapshotView({ snapshot }: { snapshot: RequirementRefBlock["snapshot"] }) {
+function SnapshotView({
+  snapshot,
+  isLink,
+}: {
+  snapshot: RequirementRefBlock["snapshot"];
+  isLink?: boolean;
+}) {
+  // For output-parameter-backed embeds the value is the user-visible "link"
+  // back to the Requirements tab — render it in blue with hover underline.
+  // Other kinds keep their existing slate styling so authored requirements
+  // don't suddenly turn into links.
+  const linkClass = isLink ? "text-blue-600 hover:underline" : "";
   if (snapshot.kind === "empty") {
-    return <p className="text-sm italic text-slate-400">No response yet.</p>;
+    return (
+      <p className={`text-sm italic ${isLink ? "text-blue-600 hover:underline" : "text-slate-400"}`}>
+        No value yet.
+      </p>
+    );
   }
   if (snapshot.kind === "text") {
-    return <p className="text-[15px] leading-relaxed text-slate-700">{snapshot.value}</p>;
+    return (
+      <p className={`text-[15px] leading-relaxed ${isLink ? linkClass : "text-slate-700"}`}>
+        {snapshot.value}
+      </p>
+    );
   }
   if (snapshot.kind === "number") {
     return (
-      <p className="text-[15px] tabular-nums text-slate-800">
+      <p className={`text-[15px] tabular-nums ${isLink ? linkClass : "text-slate-800"}`}>
         <span className="font-semibold">{snapshot.value}</span>
-        {snapshot.unit ? <span className="ml-1 text-slate-500">{snapshot.unit}</span> : null}
+        {snapshot.unit ? (
+          <span className={`ml-1 ${isLink ? "text-blue-600/70" : "text-slate-500"}`}>
+            {snapshot.unit}
+          </span>
+        ) : null}
       </p>
     );
   }

@@ -12,23 +12,23 @@
 //   - calculated parameters → v_current_metrics (annual) or evaluator
 //     re-run via the same logic the /timeseries endpoint uses (monthly)
 //
-// To keep this file focused, monthly calculated series re-use the existing
-// /api/chaincraft/timeseries route. We call it server-side via fetch so we
-// don't duplicate the topo-sort + evaluator wiring.
+// To keep this file focused, the monthly calculated series re-uses the same
+// topo-sort + evaluator pass the /api/metrics/timeseries route uses.
 
 import { getSupabaseServiceClient } from "@/lib/supabase/server";
-import { evaluate, topoSortFormulas } from "@/lib/chaincraft/evaluator";
+import { evaluate, topoSortFormulas } from "@/lib/metrics/evaluator";
 import type { Parameter, DataPoint, Formula, CurrentMetricRow } from "@/lib/supabase/types";
 import type { ChartSpec, ChartData, ChartSeries, ChartSeriesPoint } from "@/lib/dashboard/chart-spec";
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
-export async function fetchChartData(spec: ChartSpec): Promise<ChartData> {
+export async function fetchChartData(orgId: string, spec: ChartSpec): Promise<ChartData> {
   const supabase = getSupabaseServiceClient();
 
   const { data: period, error: pErr } = await supabase
     .from("reporting_periods")
     .select("id, code, label")
+    .eq("org_id", orgId)
     .eq("code", spec.period_code)
     .maybeSingle();
   if (pErr) throw new Error(pErr.message);
@@ -39,6 +39,7 @@ export async function fetchChartData(spec: ChartSpec): Promise<ChartData> {
   const { data: parameters, error: paramsErr } = await supabase
     .from("parameters")
     .select("*")
+    .eq("org_id", orgId)
     .order("display_order");
   if (paramsErr) throw new Error(paramsErr.message);
 
@@ -54,6 +55,7 @@ export async function fetchChartData(spec: ChartSpec): Promise<ChartData> {
         const { data: row } = await supabase
           .from("v_current_metrics")
           .select("value")
+          .eq("org_id", orgId)
           .eq("period_id", period.id)
           .eq("parameter_code", code)
           .maybeSingle<CurrentMetricRow>();
@@ -62,6 +64,7 @@ export async function fetchChartData(spec: ChartSpec): Promise<ChartData> {
         const { data: row } = await supabase
           .from("data_points")
           .select("value_annual")
+          .eq("org_id", orgId)
           .eq("period_id", period.id)
           .eq("parameter_id", param.id)
           .maybeSingle();
@@ -82,8 +85,8 @@ export async function fetchChartData(spec: ChartSpec): Promise<ChartData> {
   // Re-implement the slimmed-down evaluator pass that timeseries route uses,
   // but only compute the series we need.
   const [{ data: dataPoints }, { data: formulas }] = await Promise.all([
-    supabase.from("data_points").select("*").eq("period_id", period.id),
-    supabase.from("formulas").select("*").eq("is_active", true),
+    supabase.from("data_points").select("*").eq("org_id", orgId).eq("period_id", period.id),
+    supabase.from("formulas").select("*").eq("org_id", orgId).eq("is_active", true),
   ]);
 
   const dpByParam = new Map<string, DataPoint>((dataPoints as DataPoint[] ?? []).map(d => [d.parameter_id, d]));

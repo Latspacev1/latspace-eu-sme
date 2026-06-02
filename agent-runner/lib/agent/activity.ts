@@ -30,6 +30,9 @@ export function describeToolUse(
   if (toolName.endsWith("__propose_insert")) {
     return { kind: "propose", label: "Drafting insertion" };
   }
+  if (toolName.endsWith("__propose_extraction")) {
+    return { kind: "propose", label: "Proposing extracted metrics" };
+  }
   if (toolName === "WebSearch") {
     const q = typeof args.query === "string" ? args.query : "";
     return { kind: "websearch", label: "Searching the web", detail: q || undefined };

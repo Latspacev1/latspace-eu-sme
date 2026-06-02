@@ -8,6 +8,7 @@ import { QuestionnaireHeader } from "@/components/reporting/QuestionnaireHeader"
 import { QuestionPanel } from "@/components/reporting/QuestionPanel";
 import { AssistantPane as QualitativeAssistantPane } from "@/components/reporting/qualitative/AssistantPane";
 import { ConfirmDialog, type ConfirmDialogState } from "@/components/reporting/ConfirmDialog";
+import { OutputParametersTab } from "@/components/reporting/OutputParametersTab";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -243,6 +244,7 @@ export function Questionnaire({ config, initialQuestionId: initialQuestionIdProp
   );
   const [search, setSearch] = useState("");
   const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogState | null>(null);
+  const [tab, setTab] = useState<"document" | "requirements">("document");
 
   const active = allQuestions.find((x) => x.q.id === activeId);
   const completedCount = Object.values(answers).filter((a) => a.status === "completed").length;
@@ -382,6 +384,41 @@ export function Questionnaire({ config, initialQuestionId: initialQuestionIdProp
         version={config.version}
         onExport={config.onExport}
       />
+      <div className="border-b border-slate-200 bg-white px-6">
+        <div className="flex gap-6 text-sm">
+          <button
+            onClick={() => setTab("requirements")}
+            className={`-mb-px border-b-2 py-2.5 ${
+              tab === "requirements"
+                ? "border-brand font-medium text-slate-900"
+                : "border-transparent text-slate-500 hover:text-slate-800"
+            }`}
+          >
+            Requirements
+          </button>
+          <button
+            onClick={() => setTab("document")}
+            className={`-mb-px border-b-2 py-2.5 ${
+              tab === "document"
+                ? "border-brand font-medium text-slate-900"
+                : "border-transparent text-slate-500 hover:text-slate-800"
+            }`}
+          >
+            Document
+          </button>
+        </div>
+      </div>
+      {tab === "requirements" ? (
+        <div className="flex flex-1 overflow-hidden">
+          <OutputParametersTab
+            frameworkId={config.frameworkId as "cdp" | "vsme"}
+            onOpenQuestion={(id) => {
+              setActiveId(id);
+              setTab("document");
+            }}
+          />
+        </div>
+      ) : (
       <div className="flex flex-1 overflow-hidden">
         {panes.leftCollapsed ? (
           <CollapsedRail side="left" label="Sections" onExpand={() => setPanes((p) => ({ ...p, leftCollapsed: false }))} />
@@ -439,6 +476,7 @@ export function Questionnaire({ config, initialQuestionId: initialQuestionIdProp
           </>
         )}
       </div>
+      )}
     </div>
 
     <ConfirmDialog state={confirmDialog} onClose={() => setConfirmDialog(null)} />

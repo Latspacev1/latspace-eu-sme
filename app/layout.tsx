@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { IBM_Plex_Sans, IBM_Plex_Mono } from "next/font/google";
 import "./globals.css";
+import { ClerkProvider } from "@clerk/nextjs";
 import { Providers } from "@/lib/providers";
 import { Toaster } from "@/components/ui/sonner";
 
@@ -34,10 +35,12 @@ export default function RootLayout({
       <body
         className={`${ibmPlexSans.variable} ${ibmPlexMono.variable} antialiased`}
       >
-        <Providers>
-          {children}
-          <Toaster />
-        </Providers>
+        <ClerkProvider>
+          <Providers>
+            {children}
+            <Toaster />
+          </Providers>
+        </ClerkProvider>
       </body>
     </html>
   );

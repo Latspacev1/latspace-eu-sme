@@ -70,3 +70,25 @@ export interface WriteJob {
   outline: OutlineItem[];
   framework?: string;
 }
+
+// A parameter the org already has — passed in so the extraction agent reuses
+// existing codes instead of proposing duplicates.
+export interface ExistingParameter {
+  code: string;
+  display_name: string;
+  unit: string;
+  section: string;
+}
+
+export interface ExtractJob {
+  mode: "extract";
+  // Short-TTL signed URL to the uploaded document in Supabase Storage. The
+  // runner fetches the bytes itself — they are never inlined into JOB_JSON.
+  documentUrl: string;
+  filename: string;
+  mimeType: string;
+  framework?: string;
+  // Optional hint about the reporting period the document covers.
+  periodHint?: string;
+  existingParameters?: ExistingParameter[];
+}

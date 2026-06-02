@@ -1,29 +1,46 @@
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
 import type { UserRole, FilterState } from "../types";
-import { authApi } from "../api/auth";
 import { apiClient } from "../api/client";
+
+// Minimal generic shape the auth layer maps a Clerk user into. Keeping this
+// decoupled from Clerk's types lets the store stay provider-agnostic.
+type SessionInput =
+  | {
+      id: string;
+      email: string | null;
+      fullName: string | null;
+      avatarUrl: string | null;
+    }
+  | null;
 
 interface User {
   username: string;
   email: string;
   role: UserRole;
   displayName: string;
+  /** Active organization (company) name. Resolved server-side after sign-in. */
+  companyName: string;
   userId: string;
   orgId: string;
   plantId: string | null;
 }
 
 interface AppState {
-  // Authentication
+  // Authentication — hydrated from the Clerk session, NOT persisted.
   isAuthenticated: boolean;
   user: User | null;
+  // Retained as `null` for backwards compatibility with non-auth callers that
+  // still read `state.token` (lib/api/*). Auth now travels via Clerk cookies,
+  // so there is no client-held bearer token anymore.
   token: string | null;
   currentRole: UserRole | null;
   setCurrentRole: (role: UserRole) => void;
-  login: (email: string, password: string) => Promise<{ success: boolean; error?: string }>;
-  logout: () => Promise<void>;
-  refreshToken: () => Promise<boolean>;
+  // Populated by the Clerk session-sync layer (AuthMiddleware via useUser).
+  setSession: (input: SessionInput) => void;
+  // Sets the active organization (company) name once resolved server-side.
+  setCompanyName: (companyName: string) => void;
+  logout: () => void;
 
   // Sidebar
   sidebarCollapsed: boolean;
@@ -47,22 +64,39 @@ const defaultFilters: FilterState = {
   year: 2024,
 };
 
-function mapBackendRoleToFrontend(_backendRole: string): UserRole {
-  return "CorporateHead";
-}
+// Default frontend role until a real org/role claim is wired in (task 7).
+const DEFAULT_ROLE: UserRole = "CorporateHead";
 
-function getDisplayNameFromRole(_role: UserRole): string {
-  return "Corporate Head";
+function mapSessionInput(input: NonNullable<SessionInput>): User {
+  const email = input.email ?? "";
+  const label = input.fullName || email || "User";
+  const role = DEFAULT_ROLE;
+  return {
+    username: label,
+    email,
+    role,
+    displayName: label,
+    // Resolved separately via setCompanyName once the active org is known.
+    companyName: "",
+    userId: input.id,
+    // Server resolves the real org from the session; left empty on the client.
+    orgId: "",
+    plantId: null,
+  };
 }
 
 export const useAppStore = create<AppState>()(
   persist(
-    (set, get) => {
-      // Set up API client token getter
-      apiClient.setTokenGetter(() => get().token);
-      // Set up API client auth error handler — redirect to login on 401
+    (set) => {
+      // Data routes now authenticate via same-origin cookies; there is no
+      // client-held bearer token. Keep the getter wired so apiClient doesn't
+      // crash, but it always returns null.
+      apiClient.setTokenGetter(() => null);
+      // On a 401 from the apiClient, clear local auth state and bounce to
+      // login. Clerk's own session cookie is cleared on the next sign-in flow;
+      // a hard navigation to /login lets middleware re-evaluate the session.
       apiClient.setAuthErrorHandler(() => {
-        get().logout();
+        set({ isAuthenticated: false, user: null, currentRole: null });
         if (typeof window !== "undefined") {
           window.location.href = "/login";
         }
@@ -76,100 +110,39 @@ export const useAppStore = create<AppState>()(
         currentRole: null,
         setCurrentRole: (role: UserRole) => set({ currentRole: role }),
 
-        // Sidebar state
-        sidebarCollapsed: false,
-        toggleSidebar: () => set((state) => ({ sidebarCollapsed: !state.sidebarCollapsed })),
-
-        login: async (email: string, password: string) => {
-          try {
-            const response = await authApi.login(email, password);
-
-            if (response.success && response.data) {
-              const { token, payload } = response.data;
-              const frontendRole = mapBackendRoleToFrontend(payload.role);
-
-              set({
-                isAuthenticated: true,
-                token: token,
-                user: {
-                  username: payload.username,
-                  email: payload.email,
-                  role: frontendRole,
-                  displayName: getDisplayNameFromRole(frontendRole),
-                  userId: payload.user_id,
-                  orgId: payload.org_id,
-                  plantId: payload.plant_id || null,
-                },
-                currentRole: frontendRole,
-              });
-
-              return { success: true };
-            } else {
-              return {
-                success: false,
-                error: response.error || response.message || "Login failed",
-              };
-            }
-          } catch (error) {
-            return {
-              success: false,
-              error: error instanceof Error ? error.message : "Login failed",
-            };
+        setSession: (input: SessionInput) => {
+          if (!input) {
+            set({ isAuthenticated: false, user: null, currentRole: null });
+            return;
           }
+          const user = mapSessionInput(input);
+          set({
+            isAuthenticated: true,
+            user,
+            currentRole: user.role,
+          });
         },
-        logout: async () => {
-          const token = get().token;
-          if (token) {
-            try {
-              await authApi.logout(token);
-            } catch (error) {
-              // Continue with logout even if API call fails
-              console.error("Logout API call failed:", error);
-            }
-          }
+
+        setCompanyName: (companyName: string) =>
+          set((state) =>
+            state.user ? { user: { ...state.user, companyName } } : {},
+          ),
+
+        // Clears local auth state only. Clerk's signOut() is a client hook, so
+        // the component that calls logout() (e.g. CorporateSidebar via
+        // useClerk().signOut) is responsible for ending the Clerk session.
+        logout: () => {
           set({
             isAuthenticated: false,
             user: null,
-            token: null,
             currentRole: null,
             filters: defaultFilters,
           });
         },
-        refreshToken: async () => {
-          const token = get().token;
-          if (!token) {
-            return false;
-          }
 
-          try {
-            const response = await authApi.refreshToken();
-
-            if (response.success && response.data) {
-              const { token: newToken, payload } = response.data;
-              const frontendRole = mapBackendRoleToFrontend(payload.role);
-
-              set({
-                token: newToken,
-                user: {
-                  username: payload.username,
-                  email: payload.email,
-                  role: frontendRole,
-                  displayName: getDisplayNameFromRole(frontendRole),
-                  userId: payload.user_id,
-                  orgId: payload.org_id,
-                  plantId: payload.plant_id || null,
-                },
-                currentRole: frontendRole,
-              });
-
-              return true;
-            }
-            return false;
-          } catch (error) {
-            console.error("Token refresh failed:", error);
-            return false;
-          }
-        },
+        // Sidebar state
+        sidebarCollapsed: false,
+        toggleSidebar: () => set((state) => ({ sidebarCollapsed: !state.sidebarCollapsed })),
 
         filters: defaultFilters,
         setFilters: (newFilters) =>
@@ -212,7 +185,12 @@ export const useAppStore = create<AppState>()(
           key: () => null,
         } as Storage)
       ),
+      // Persist only non-auth UI slices. Auth is re-derived from the Clerk
+      // session on every load via the AuthMiddleware session-sync layer.
+      partialize: (state) => ({
+        sidebarCollapsed: state.sidebarCollapsed,
+        filters: state.filters,
+      }),
     }
   )
 );
-

@@ -4,20 +4,19 @@ import React from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { usePathname, useRouter } from "next/navigation";
+import { useClerk } from "@clerk/nextjs";
 import { cn } from "@/lib/utils";
 import { useAppStore } from "@/lib/store/useAppStore";
 import {
   LayoutDashboard,
   LogOut,
   FileBarChart,
-  BarChart3,
-  ClipboardCheck,
   ChevronLeft,
   ChevronRight,
   ChevronDown,
   ChevronUp,
-  FileEdit,
-  Users,
+  Upload,
+  Sparkles,
 } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
@@ -36,25 +35,20 @@ const navItems: NavItem[] = [
   },
   {
     label: "Data Collection",
-    icon: FileEdit,
-    children: [
-      { href: "/approvals", label: "Logbook", icon: ClipboardCheck },
-    ],
+    href: "/corporate/extract",
+    icon: Upload,
   },
   {
     label: "Reporting",
     href: "/reporting",
     icon: FileBarChart,
-    children: [
-      { href: "/corporate/benchmarking", label: "Benchmarking", icon: BarChart3 },
-      { href: "/reporting/assignees", label: "Assignees", icon: Users },
-    ],
   },
 ];
 
 export function CorporateSidebar() {
   const pathname = usePathname();
   const router = useRouter();
+  const { signOut } = useClerk();
   const { user, logout, sidebarCollapsed, toggleSidebar } = useAppStore();
 
   const [openGroups, setOpenGroups] = React.useState<Set<string>>(() => new Set());
@@ -94,7 +88,10 @@ export function CorporateSidebar() {
     );
 
   const handleLogout = async () => {
-    await logout();
+    // Clear local store state, then end the Clerk session. signOut redirects
+    // to /login; the explicit push is a fallback if redirectUrl is ignored.
+    logout();
+    await signOut({ redirectUrl: "/login" });
     router.push("/login");
   };
 
@@ -265,9 +262,57 @@ export function CorporateSidebar() {
             {user?.username || "User"}
           </div>
           <div className="text-[11px] text-[#0A0A0A]/70 uppercase tracking-[0.08em] whitespace-nowrap">
-            {user?.displayName || "Corporate Head"}
+            {user?.companyName || "Your organization"}
           </div>
         </div>
+
+        {/* AI Context — sits just above logout. */}
+        {(() => {
+          const aiActive =
+            pathname === "/corporate/ai-context" ||
+            pathname.startsWith("/corporate/ai-context/");
+          const aiLink = (
+            <Link
+              href="/corporate/ai-context"
+              aria-label="AI Context"
+              className={cn(
+                "w-full flex items-center transition-all duration-200 rounded-md mb-3",
+                sidebarCollapsed
+                  ? "justify-center p-2"
+                  : "gap-2 px-4 py-3 text-[11px] font-medium uppercase tracking-[0.1em] whitespace-nowrap overflow-hidden",
+                aiActive
+                  ? "text-[#074D47] bg-[#074D47]/[0.04]"
+                  : "text-[#0A0A0A]/80 hover:text-[#074D47] hover:bg-[#0A0A0A]/[0.04]"
+              )}
+            >
+              <div
+                className={cn(
+                  "flex-shrink-0 flex justify-center",
+                  sidebarCollapsed ? "w-auto" : "w-4 ml-[-4px]"
+                )}
+              >
+                <Sparkles
+                  className={cn(sidebarCollapsed ? "w-[18px] h-[18px]" : "w-[14px] h-[14px]")}
+                />
+              </div>
+              {!sidebarCollapsed && (
+                <span className="max-w-[100px] opacity-100 ml-2 overflow-hidden">
+                  AI Context
+                </span>
+              )}
+            </Link>
+          );
+          return sidebarCollapsed ? (
+            <Tooltip>
+              <TooltipTrigger asChild>{aiLink}</TooltipTrigger>
+              <TooltipContent side="right" sideOffset={8}>
+                AI Context
+              </TooltipContent>
+            </Tooltip>
+          ) : (
+            aiLink
+          );
+        })()}
 
         {/* TODO: add Settings icon here once /corporate/settings route exists */}
         {sidebarCollapsed ? (

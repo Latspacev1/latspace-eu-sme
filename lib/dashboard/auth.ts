@@ -1,28 +1,31 @@
-// Resolve the calling user_id for dashboard routes.
+// Tenancy seam for dashboard / data-scoped routes.
 //
-// This app uses a demo token of the shape `demo-token-<user_id>-<exp>`.
-// The token is passed as a Bearer header by the apiClient on the client
-// side. Server-side fetches (e.g. server components) forward cookies but
-// the auth state lives in localStorage, so we accept the Bearer token here.
+// These resolve the calling user_id and org_id from the CLERK session
+// (via @clerk/nextjs/server auth()). Org lookups delegate to
+// lib/auth/session.ts, which is the single source of truth.
 //
-// We also accept a fallback X-User-Id header for local dev convenience.
-// If neither is present, we fall back to the demo user — single-tenant
-// behaviour matching how /api/chaincraft/* runs today.
+// NOTE: both functions are ASYNC. Call sites must `await` them. They take an
+// optional `req` purely for signature compatibility with the previous
+// header-based seam; resolution relies on the Clerk session, not on `req`.
+//
+// Contract: return `null` on no session / no membership. Routes translate a
+// null into a 401. They never throw.
 
-import { DEMO_USER } from "@/lib/demo-user";
+import { auth } from "@clerk/nextjs/server";
 
-export function resolveUserId(req: Request): string {
-  const auth = req.headers.get("authorization") ?? req.headers.get("Authorization");
-  if (auth?.startsWith("Bearer ")) {
-    const token = auth.slice("Bearer ".length).trim();
-    // demo-token-<user_id>-<exp>
-    if (token.startsWith("demo-token-")) {
-      const rest = token.slice("demo-token-".length);
-      const lastDash = rest.lastIndexOf("-");
-      if (lastDash > 0) return rest.slice(0, lastDash);
-    }
-  }
-  const headerUser = req.headers.get("x-user-id");
-  if (headerUser) return headerUser;
-  return DEMO_USER.user_id;
+import { getActiveMembership } from "@/lib/auth/session";
+
+/** The authenticated Clerk user id (text), or null when unauthenticated. */
+export async function resolveUserId(_req?: Request): Promise<string | null> {
+  const { userId } = await auth();
+  return userId ?? null;
+}
+
+/**
+ * The active org_id as TEXT (organizations.id rendered as uuid::text) used to
+ * scope data tables. Returns null when there is no session or no membership.
+ */
+export async function resolveOrgId(_req?: Request): Promise<string | null> {
+  const membership = await getActiveMembership();
+  return membership?.orgId ?? null;
 }

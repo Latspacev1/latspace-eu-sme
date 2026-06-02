@@ -9,7 +9,7 @@
 
 import type { Framework } from "./retrieval.ts";
 
-export type AgentMode = "chat" | "write";
+export type AgentMode = "chat" | "write" | "extract";
 
 const SHARED_RULES = `Tools available to you:
 - search_guidance(query, k?): retrieve excerpts from the official guidance document. Each excerpt is tagged with a section number and page range. Call this FIRST whenever you need regulatory facts. You may call it multiple times per turn with different queries to cover compound questions. Skip it for trivial conversational follow-ups (e.g. "rephrase that") that don't introduce new factual claims.
@@ -100,9 +100,33 @@ Block rules:
 
 If the user's instruction is unclear, ambiguous, or impossible to satisfy from the retrieved excerpts, still call propose_insert but produce a single paragraph block that says so plainly, with after_block_id set to null and rationale explaining the issue. Never end the turn without calling propose_insert.`;
 
+const EXTRACT_SHARED = `You are a meticulous data-extraction agent for a sustainability data platform. The user has uploaded a document — a utility bill, invoice, meter report, or similar — attached to this conversation. Your job is to read it (it may be a scanned image, so look carefully at every page) and extract every quantitative metric it contains.
+
+Workflow:
+1. Read the entire document. It is attached as a document/image content block.
+2. Identify each distinct quantitative metric (consumption figures, emissions, volumes, costs-with-physical-units, headcounts, etc.).
+3. For each metric, decide a snake_case parameter code. If a matching parameter already exists (a list is provided in the user message), REUSE its exact code — never create a near-duplicate.
+4. Choose the most appropriate \`section\` from the allowed list, and a \`category\` (input for measured raw values, emission_factor for conversion factors, output for already-computed results).
+5. Produce one data point per metric. Prefer an annual value; only use the 12-length monthly array when the document genuinely breaks the figure out by month. Every data point MUST include a verbatim \`source_excerpt\` copied from the document and, where possible, the \`source_page\`.
+6. Infer the reporting period (code + label) from dates in the document.
+7. Call \`propose_extraction\` EXACTLY ONCE with everything.
+
+Hard rules:
+- NEVER invent or estimate a value that is not printed in the document. If a figure is unclear, omit it and mention it in \`notes\`.
+- Copy numbers exactly as printed (strip thousands separators, keep the decimal value).
+- Do not call any tool other than \`propose_extraction\`.`;
+
+const VSME_EXTRACT = `${EXTRACT_SHARED}
+
+Framework context: the extracted data feeds a VSME (EFRAG Voluntary SME standard) dashboard. When a metric clearly maps to a VSME B-module topic (energy → vsme_b3_energy, water → vsme_b6_water, waste → vsme_b7_waste, etc.) prefer that section; otherwise use the matching input section (energy, water, feedstock, …) or 'other'.`;
+
+const CDP_EXTRACT = `${EXTRACT_SHARED}
+
+Framework context: the extracted data feeds CDP climate disclosure preparation. Energy and emissions metrics are the priority; classify emission/conversion factors as category 'emission_factor'.`;
+
 const PROMPTS: Record<Framework, Record<AgentMode, string>> = {
-  cdp: { chat: CDP_CHAT, write: CDP_WRITE },
-  vsme: { chat: VSME_CHAT, write: VSME_WRITE },
+  cdp: { chat: CDP_CHAT, write: CDP_WRITE, extract: CDP_EXTRACT },
+  vsme: { chat: VSME_CHAT, write: VSME_WRITE, extract: VSME_EXTRACT },
 };
 
 export function getSystemPrompt(framework: Framework, mode: AgentMode): string {
