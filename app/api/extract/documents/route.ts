@@ -6,6 +6,10 @@
 import { NextResponse } from "next/server";
 import { getSupabaseServiceClient } from "@/lib/supabase/server";
 import { resolveOrgId } from "@/lib/dashboard/auth";
+import {
+  normalizeClassification,
+  type DocumentClassification,
+} from "@/lib/types/document-classification";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -17,6 +21,11 @@ export interface RecordedParameter {
   unit: string;
   category: string;
   section: string;
+  /**
+   * The recorded value for this parameter: the annual value when present,
+   * otherwise the sum of the 12 monthly values. null when neither is available.
+   */
+  value: number | null;
 }
 
 export interface ExtractionDocumentSummary {
@@ -29,6 +38,22 @@ export interface ExtractionDocumentSummary {
   period_code: string | null;
   /** Parameters this document recorded (from the committed proposal). */
   parameters: RecordedParameter[];
+  /** Category/subcategory the agent assigned (or the reviewer overrode). */
+  classification: DocumentClassification | null;
+}
+
+/** Resolve a single recorded value from a data point (annual, else monthly sum). */
+function valueFromDataPoint(dp: Record<string, unknown>): number | null {
+  const annual = dp.value_annual;
+  if (typeof annual === "number" && Number.isFinite(annual)) return annual;
+  const monthly = dp.values_monthly;
+  if (Array.isArray(monthly)) {
+    const nums = monthly.filter(
+      (m): m is number => typeof m === "number" && Number.isFinite(m),
+    );
+    if (nums.length) return nums.reduce((a, b) => a + b, 0);
+  }
+  return null;
 }
 
 /** Coerce the stored proposal JSONB into the list of recorded parameters. */
@@ -36,15 +61,31 @@ function parametersFromProposal(proposal: unknown): RecordedParameter[] {
   if (typeof proposal !== "object" || proposal === null) return [];
   const params = (proposal as { parameters?: unknown }).parameters;
   if (!Array.isArray(params)) return [];
+
+  // Map parameter_code → value from the proposal's data_points.
+  const dataPoints = (proposal as { data_points?: unknown }).data_points;
+  const valueByCode = new Map<string, number | null>();
+  if (Array.isArray(dataPoints)) {
+    for (const d of dataPoints) {
+      const dp = (d ?? {}) as Record<string, unknown>;
+      const code = typeof dp.parameter_code === "string" ? dp.parameter_code : "";
+      if (code && !valueByCode.has(code)) {
+        valueByCode.set(code, valueFromDataPoint(dp));
+      }
+    }
+  }
+
   return params.map((p) => {
     const row = (p ?? {}) as Record<string, unknown>;
+    const code = typeof row.code === "string" ? row.code : "";
     return {
-      code: typeof row.code === "string" ? row.code : "",
+      code,
       display_name:
         typeof row.display_name === "string" ? row.display_name : "",
       unit: typeof row.unit === "string" ? row.unit : "",
       category: typeof row.category === "string" ? row.category : "",
       section: typeof row.section === "string" ? row.section : "",
+      value: valueByCode.has(code) ? valueByCode.get(code)! : null,
     };
   });
 }
@@ -59,7 +100,7 @@ export async function GET(req: Request) {
   const { data, error } = await supabase
     .from("extraction_documents")
     .select(
-      "id, filename, mime_type, status, created_at, proposal, reporting_periods:period_id(code)",
+      "id, filename, mime_type, status, created_at, proposal, classification, reporting_periods:period_id(code)",
     )
     .eq("org_id", orgId)
     .order("created_at", { ascending: false })
@@ -86,6 +127,14 @@ export async function GET(req: Request) {
       parameters: parametersFromProposal(
         (row as { proposal?: unknown }).proposal,
       ),
+      // Prefer the dedicated column; fall back to the proposal blob for rows
+      // committed before the classification column existed.
+      classification:
+        normalizeClassification((row as { classification?: unknown }).classification) ??
+        normalizeClassification(
+          ((row as { proposal?: { classification?: unknown } }).proposal ?? {})
+            .classification,
+        ),
     };
   });
 

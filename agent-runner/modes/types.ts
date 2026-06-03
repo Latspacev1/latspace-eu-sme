@@ -47,6 +47,10 @@ export interface ChatJob {
   messages: ChatMessage[];
   framework?: string;
   context?: ChatContext | null;
+  // The reporting org's self-authored business context (from the AI Context
+  // page). Injected into the system prompt to ground answers in company
+  // specifics. Optional/nullable so older payloads and the local stub work.
+  businessContext?: string | null;
 }
 
 export interface OutlineItem {
@@ -69,6 +73,9 @@ export interface WriteJob {
   instruction: string;
   outline: OutlineItem[];
   framework?: string;
+  // See ChatJob.businessContext — same grounding context, injected into the
+  // write-mode system prompt.
+  businessContext?: string | null;
 }
 
 // A parameter the org already has — passed in so the extraction agent reuses

@@ -13,6 +13,7 @@ import { resolveOrgId } from "@/lib/dashboard/auth";
 import {
   parseOnboardingProfile,
   emptyOnboardingProfile,
+  normalizeStoredProfile,
   type OnboardingProfile,
 } from "@/lib/types/onboarding";
 
@@ -36,9 +37,13 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
-  const profile =
-    (data?.onboarding_profile as OnboardingProfile | null) ??
-    emptyOnboardingProfile(data?.name ?? "");
+  // Normalize the stored blob so profiles written before a field existed (e.g.
+  // businessContext) always come back with the full, current shape — the page
+  // relies on every field being present (controlled inputs, .length reads).
+  const stored = data?.onboarding_profile as OnboardingProfile | null;
+  const profile = stored
+    ? normalizeStoredProfile(stored, data?.name ?? "")
+    : emptyOnboardingProfile(data?.name ?? "");
 
   return NextResponse.json({ profile });
 }

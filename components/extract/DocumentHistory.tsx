@@ -14,27 +14,18 @@ import {
   RefreshCw,
   ChevronRight,
 } from "lucide-react";
+import { listExtractionDocuments } from "@/lib/api/extract";
 import {
-  listExtractionDocuments,
-  type ExtractionDocumentSummary,
-} from "@/lib/api/extract";
+  CATEGORY_LABELS,
+  type Category,
+} from "@/lib/types/document-classification";
 
-const STATUS_STYLES: Record<
-  ExtractionDocumentSummary["status"],
-  { label: string; className: string }
-> = {
-  committed: {
-    label: "Committed",
-    className: "bg-emerald-50 text-emerald-700 border-emerald-200",
-  },
-  pending: {
-    label: "Pending",
-    className: "bg-amber-50 text-amber-700 border-amber-200",
-  },
-  failed: {
-    label: "Failed",
-    className: "bg-red-50 text-red-700 border-red-200",
-  },
+// Color-coded chip per category for the history table.
+const CATEGORY_STYLES: Record<Category, string> = {
+  general_information: "bg-slate-100 text-slate-700 border-slate-200",
+  environmental: "bg-emerald-50 text-emerald-700 border-emerald-200",
+  social: "bg-blue-50 text-blue-700 border-blue-200",
+  governance: "bg-violet-50 text-violet-700 border-violet-200",
 };
 
 function formatDate(iso: string): string {
@@ -47,6 +38,12 @@ function formatDate(iso: string): string {
     hour: "2-digit",
     minute: "2-digit",
   });
+}
+
+// Compact number formatting with locale grouping; trims to at most 4 decimals
+// so values like 1234.5 and 0.0821 read cleanly without scientific notation.
+function formatValue(n: number): string {
+  return n.toLocaleString(undefined, { maximumFractionDigits: 4 });
 }
 
 export function DocumentHistory() {
@@ -104,16 +101,17 @@ export function DocumentHistory() {
             <thead>
               <tr className="border-b border-slate-200 bg-slate-50 text-left text-[11px] uppercase tracking-wider text-slate-500">
                 <th className="px-4 py-2.5 font-medium">Document</th>
+                <th className="px-4 py-2.5 font-medium">Category</th>
+                <th className="px-4 py-2.5 font-medium">Subcategory</th>
                 <th className="px-4 py-2.5 font-medium">Period</th>
                 <th className="px-4 py-2.5 font-medium">Parameters</th>
-                <th className="px-4 py-2.5 font-medium">Status</th>
                 <th className="px-4 py-2.5 font-medium">Uploaded</th>
               </tr>
             </thead>
             <tbody>
               {data.map((doc) => {
                 const isImage = doc.mime_type.startsWith("image/");
-                const status = STATUS_STYLES[doc.status] ?? STATUS_STYLES.pending;
+                const cls = doc.classification;
                 const paramCount = doc.parameters.length;
                 const isOpen = expanded.has(doc.id);
                 const canExpand = paramCount > 0;
@@ -149,6 +147,20 @@ export function DocumentHistory() {
                           </span>
                         </div>
                       </td>
+                      <td className="px-4 py-3">
+                        {cls ? (
+                          <span
+                            className={`inline-flex rounded-full border px-2 py-0.5 text-[11px] font-medium ${CATEGORY_STYLES[cls.category]}`}
+                          >
+                            {CATEGORY_LABELS[cls.category]}
+                          </span>
+                        ) : (
+                          <span className="text-slate-400">—</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-slate-600">
+                        {cls ? cls.subcategory : "—"}
+                      </td>
                       <td className="px-4 py-3 text-slate-600">
                         {doc.period_code ?? "—"}
                       </td>
@@ -161,13 +173,6 @@ export function DocumentHistory() {
                           "—"
                         )}
                       </td>
-                      <td className="px-4 py-3">
-                        <span
-                          className={`inline-flex rounded-full border px-2 py-0.5 text-[11px] font-medium ${status.className}`}
-                        >
-                          {status.label}
-                        </span>
-                      </td>
                       <td className="px-4 py-3 whitespace-nowrap text-slate-500">
                         {formatDate(doc.created_at)}
                       </td>
@@ -175,7 +180,7 @@ export function DocumentHistory() {
 
                     {isOpen && (
                       <tr className="border-b border-slate-100 last:border-0 bg-slate-50/40">
-                        <td colSpan={5} className="px-4 py-3">
+                        <td colSpan={6} className="px-4 py-3">
                           <div className="pl-6">
                             <div className="mb-2 text-[11px] font-medium uppercase tracking-wider text-slate-500">
                               Recorded parameters
@@ -185,6 +190,7 @@ export function DocumentHistory() {
                                 <thead>
                                   <tr className="border-b border-slate-200 text-left text-[10px] uppercase tracking-wider text-slate-400">
                                     <th className="px-3 py-2 font-medium">Parameter</th>
+                                    <th className="px-3 py-2 font-medium">Value</th>
                                     <th className="px-3 py-2 font-medium">Code</th>
                                     <th className="px-3 py-2 font-medium">Unit</th>
                                     <th className="px-3 py-2 font-medium">Category</th>
@@ -199,6 +205,22 @@ export function DocumentHistory() {
                                     >
                                       <td className="px-3 py-2 font-medium text-[#0A0A0A]">
                                         {p.display_name || p.code || "—"}
+                                      </td>
+                                      <td className="px-3 py-2 whitespace-nowrap tabular-nums text-[#0A0A0A]">
+                                        {p.value !== null ? (
+                                          <>
+                                            <span className="font-medium">
+                                              {formatValue(p.value)}
+                                            </span>
+                                            {p.unit ? (
+                                              <span className="ml-1 text-slate-400">
+                                                {p.unit}
+                                              </span>
+                                            ) : null}
+                                          </>
+                                        ) : (
+                                          <span className="text-slate-400">—</span>
+                                        )}
                                       </td>
                                       <td className="px-3 py-2 font-mono text-[12px] text-slate-500">
                                         {p.code || "—"}

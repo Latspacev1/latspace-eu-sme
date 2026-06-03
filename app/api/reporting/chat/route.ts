@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { dispatch } from "@/lib/dispatcher";
 import { resolveRagFramework } from "@/lib/dispatcher/frameworks";
+import { getOrgBusinessContext } from "@/lib/reporting/orgContext";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -41,12 +42,17 @@ export async function POST(req: NextRequest) {
   // re-validate; the runner trusts what we pass in.
   const framework = resolveRagFramework(body.framework);
 
+  // Ground the agent in the org's business context (AI Context page). Fail-soft:
+  // null when unauthenticated or absent, so the agent still runs ungrounded.
+  const businessContext = await getOrgBusinessContext(req);
+
   return dispatch({
     job: {
       mode: "chat",
       messages: body.messages,
       framework,
       context: body.context ?? null,
+      businessContext,
     },
   });
 }

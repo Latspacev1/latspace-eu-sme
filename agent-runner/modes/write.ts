@@ -97,7 +97,7 @@ Search the guidance for any regulatory facts you need, then call propose_insert 
     prompt: once(),
     options: {
       model: "claude-opus-4-7",
-      systemPrompt: getSystemPrompt(framework, "write"),
+      systemPrompt: getSystemPrompt(framework, "write", job.businessContext),
       mcpServers: { [framework]: mcpServer },
       allowedTools: [
         toolSearchGuidance(framework),

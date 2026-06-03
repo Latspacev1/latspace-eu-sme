@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useEffect, useCallback } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import {
@@ -140,11 +140,6 @@ export default function ReportingPage() {
     }
   }
 
-  const handleSync = useCallback(() => {
-    setProgressVersion((v) => v + 1);
-    toast.success("Progress synced.");
-  }, []);
-
   // Build filtered table entries
   const { entries, leafTotal, leafMatching } = useMemo(() => {
     const result: TableEntry[] = [];
@@ -190,7 +185,6 @@ export default function ReportingPage() {
         onCategory={setCategory}
         status={status}
         onStatus={setStatus}
-        onSync={handleSync}
       />
 
       <div className="flex items-baseline justify-between mb-4">

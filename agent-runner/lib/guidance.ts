@@ -8,6 +8,7 @@
 // only.
 
 import type { Framework } from "./retrieval.ts";
+import { classificationGuide } from "./agent/classification.ts";
 
 export type AgentMode = "chat" | "write" | "extract";
 
@@ -104,12 +105,15 @@ const EXTRACT_SHARED = `You are a meticulous data-extraction agent for a sustain
 
 Workflow:
 1. Read the entire document. It is attached as a document/image content block.
-2. Identify each distinct quantitative metric (consumption figures, emissions, volumes, costs-with-physical-units, headcounts, etc.).
-3. For each metric, decide a snake_case parameter code. If a matching parameter already exists (a list is provided in the user message), REUSE its exact code — never create a near-duplicate.
-4. Choose the most appropriate \`section\` from the allowed list, and a \`category\` (input for measured raw values, emission_factor for conversion factors, output for already-computed results).
-5. Produce one data point per metric. Prefer an annual value; only use the 12-length monthly array when the document genuinely breaks the figure out by month. Every data point MUST include a verbatim \`source_excerpt\` copied from the document and, where possible, the \`source_page\`.
-6. Infer the reporting period (code + label) from dates in the document.
-7. Call \`propose_extraction\` EXACTLY ONCE with everything.
+2. Classify the document into ONE category and ONE subcategory from this taxonomy, based on its primary subject:
+${classificationGuide()}
+   Pick the category that best describes what the document is fundamentally about (e.g. an electricity bill → environmental / Electricity; a payroll or headcount report → social / Employee; a board/ownership document → governance / Ownership and governance structure; a company registration or entity profile → general_information / General). The subcategory MUST belong to the chosen category's list. For general_information always use 'General'.
+3. Identify each distinct quantitative metric (consumption figures, emissions, volumes, costs-with-physical-units, headcounts, etc.).
+4. For each metric, decide a snake_case parameter code. If a matching parameter already exists (a list is provided in the user message), REUSE its exact code — never create a near-duplicate.
+5. Choose the most appropriate \`section\` from the allowed list, and a \`category\` (input for measured raw values, emission_factor for conversion factors, output for already-computed results).
+6. Produce one data point per metric. Prefer an annual value; only use the 12-length monthly array when the document genuinely breaks the figure out by month. Every data point MUST include a verbatim \`source_excerpt\` copied from the document and, where possible, the \`source_page\`.
+7. Infer the reporting period (code + label) from dates in the document.
+8. Call \`propose_extraction\` EXACTLY ONCE with the classification and everything else.
 
 Hard rules:
 - NEVER invent or estimate a value that is not printed in the document. If a figure is unclear, omit it and mention it in \`notes\`.
@@ -129,6 +133,35 @@ const PROMPTS: Record<Framework, Record<AgentMode, string>> = {
   vsme: { chat: VSME_CHAT, write: VSME_WRITE, extract: VSME_EXTRACT },
 };
 
-export function getSystemPrompt(framework: Framework, mode: AgentMode): string {
-  return PROMPTS[framework][mode];
+// Hard ceiling mirroring BUSINESS_CONTEXT_MAX in lib/types/onboarding.ts. The
+// value is already capped at the source (form + DB), but legacy blobs could
+// exceed it; slicing here keeps a runaway profile from ballooning the prompt.
+const BUSINESS_CONTEXT_MAX = 8000;
+
+// Wraps the org's self-description in a fenced block with explicit guardrails:
+// it is background, NOT regulatory guidance, and must never be cited as a
+// source or used to invent figures. Placed AFTER the framework rules so the
+// official guidance stays authoritative.
+function companyContextBlock(businessContext: string): string {
+  const trimmed = businessContext.slice(0, BUSINESS_CONTEXT_MAX);
+  return `<company_context>
+The reporting organisation has provided the following self-description of its business and sustainability-relevant operations. Use it to make your answers and drafts specific to this company — prefer it for company facts (sector, sites, products, operations, footprint).
+
+Important boundaries:
+- This is background context the company wrote about itself. It is NOT regulatory guidance and is NOT a citable source. Never cite it with §section/page or as a [Source: …] link.
+- It does not override facts retrieved via search_guidance. Where the two conflict on a regulatory point, the guidance wins.
+- Do not invent or infer figures (emissions, headcounts, energy, etc.) that the context does not explicitly state. If a needed figure is absent, say so rather than fabricating one.
+
+${trimmed}
+</company_context>`;
+}
+
+export function getSystemPrompt(
+  framework: Framework,
+  mode: AgentMode,
+  businessContext?: string | null,
+): string {
+  const base = PROMPTS[framework][mode];
+  if (!businessContext?.trim()) return base;
+  return `${base}\n\n${companyContextBlock(businessContext.trim())}`;
 }

@@ -322,6 +322,12 @@ export function Questionnaire({ config, initialQuestionId: initialQuestionIdProp
   // because QuestionPanel's prop type still expects an `onSectionSync`.
   const onSectionSync = useCallback(async () => {}, []);
 
+  // Sync — functionality to be defined. Wired here so the header's Sync button
+  // (next to Export) has a handler to call.
+  const handleSync = useCallback(async () => {
+    // TODO: implement Sync behavior.
+  }, []);
+
   if (!active) {
     return <div className="flex h-full items-center justify-center text-sm text-slate-400">No questions available.</div>;
   }
@@ -383,6 +389,7 @@ export function Questionnaire({ config, initialQuestionId: initialQuestionIdProp
         frameworkName={config.frameworkName}
         version={config.version}
         onExport={config.onExport}
+        onSync={handleSync}
       />
       <div className="border-b border-slate-200 bg-white px-6">
         <div className="flex gap-6 text-sm">
