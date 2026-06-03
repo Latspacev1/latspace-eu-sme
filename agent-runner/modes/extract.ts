@@ -90,7 +90,7 @@ Read the whole document, then call propose_extraction exactly once with every qu
   const q = query({
     prompt: once(),
     options: {
-      model: "claude-opus-4-7",
+      model: "claude-sonnet-4-5",
       systemPrompt: getSystemPrompt(framework, "extract"),
       mcpServers: { [framework]: mcpServer },
       allowedTools: [toolProposeExtraction(framework)],

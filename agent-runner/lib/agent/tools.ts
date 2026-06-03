@@ -10,6 +10,7 @@ import { tool, createSdkMcpServer, type SdkMcpToolDefinition } from "@anthropic-
 import { z } from "zod";
 import { search, type Framework, type RetrievedChunk } from "../retrieval.ts";
 import { ALLOWED_SECTIONS } from "./param-sections.ts";
+import { CATEGORIES, SUBCATEGORIES, type DocumentClassification } from "./classification.ts";
 
 export interface RetrievedSource {
   section: string;
@@ -54,6 +55,7 @@ export interface ProposedDataPoint {
 
 export interface ExtractionProposal {
   period: { code: string; label: string; start_date?: string; end_date?: string };
+  classification: DocumentClassification;
   parameters: ProposedParameter[];
   data_points: ProposedDataPoint[];
   notes?: string;
@@ -264,9 +266,34 @@ export function createAgentMcpServer(framework: Framework, opts: AgentMcpOptions
       confidence: z.number().min(0).max(1).optional(),
     });
 
+    const subcatList = CATEGORIES.flatMap((c) => [...SUBCATEGORIES[c]]);
+    const classificationSchema = z
+      .object({
+        category: z
+          .enum(CATEGORIES)
+          .describe(
+            "Top-level subject of the document: general_information (company/entity info), environmental (energy, water, waste, fuel, feedstock, logistics, packaging, purchased goods, biodiversity), social (employees, turnover, health & safety, worker representation), or governance (ownership, conduct policies, legal proceedings, certifications/audits/permits).",
+          ),
+        subcategory: z
+          .enum(subcatList as [string, ...string[]])
+          .describe(
+            "The specific subcategory WITHIN the chosen category. Must belong to that category's list. For general_information always use 'General'.",
+          ),
+      })
+      .superRefine((val, ctx) => {
+        const allowed = SUBCATEGORIES[val.category] as readonly string[];
+        if (!allowed.includes(val.subcategory)) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ["subcategory"],
+            message: `subcategory "${val.subcategory}" is not valid for category "${val.category}". Allowed: ${allowed.join(", ")}.`,
+          });
+        }
+      });
+
     const proposeExtraction = tool(
       "propose_extraction",
-      "Submit the metrics you extracted from the document. Call this EXACTLY ONCE, at the end, after you have read the whole document. Every data point must cite a verbatim source_excerpt. Never invent values that are not present in the document.",
+      "Submit the metrics you extracted from the document. Call this EXACTLY ONCE, at the end, after you have read the whole document. Classify the document, then list every metric. Every data point must cite a verbatim source_excerpt. Never invent values that are not present in the document.",
       {
         period: z.object({
           code: z.string().min(1).describe("Short period code, e.g. 'FY2025' or '2025-03'."),
@@ -274,6 +301,9 @@ export function createAgentMcpServer(framework: Framework, opts: AgentMcpOptions
           start_date: z.string().optional().describe("ISO date if determinable."),
           end_date: z.string().optional(),
         }),
+        classification: classificationSchema.describe(
+          "Classify the document into one category and one subcategory based on its primary subject.",
+        ),
         parameters: z.array(proposedParameter).describe("Every distinct metric found. Reuse existing codes; do not duplicate."),
         data_points: z.array(proposedDataPoint).describe("One per parameter per period, with provenance."),
         notes: z.string().optional().describe("Anything ambiguous the reviewer should know."),
@@ -288,6 +318,7 @@ export function createAgentMcpServer(framework: Framework, opts: AgentMcpOptions
         // commit route re-validates against the org catalogue.
         onExtraction({
           period: args.period,
+          classification: args.classification as DocumentClassification,
           parameters: args.parameters,
           data_points: args.data_points,
           notes: args.notes,

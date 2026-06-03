@@ -7,7 +7,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
-import { Sparkles, Loader2 } from "lucide-react";
+import { Sparkles, Loader2, Wand2 } from "lucide-react";
 
 import {
   emptyOnboardingProfile,
@@ -28,6 +28,8 @@ export default function AiContextPage() {
   const [original, setOriginal] = useState<OnboardingProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [sculpting, setSculpting] = useState(false);
+  const [sculptSources, setSculptSources] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -80,6 +82,43 @@ export default function AiContextPage() {
   );
 
   const vsmeSelected = !!profile?.reports.includes("vsme");
+
+  const handleSculpt = async () => {
+    if (!profile || sculpting || saving) return;
+    if (!profile.companyName.trim()) {
+      toast.error("Add a company name first so Sculptor knows what to research.");
+      return;
+    }
+    setSculpting(true);
+    setSculptSources([]);
+    try {
+      const res = await fetch("/api/ai-context/sculptor", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          companyName: profile.companyName,
+          websiteUrl: profile.websiteUrl,
+        }),
+      });
+      const data = (await res.json().catch(() => ({}))) as {
+        ok?: boolean;
+        businessContext?: string;
+        sources?: string[];
+        error?: string;
+      };
+      if (res.ok && data.ok && data.businessContext) {
+        update({ businessContext: data.businessContext });
+        setSculptSources(Array.isArray(data.sources) ? data.sources : []);
+        toast.success("Sculptor drafted your business context. Review and save.");
+      } else {
+        toast.error(data.error || "Sculptor couldn't generate context.");
+      }
+    } catch {
+      toast.error("Sculptor request failed.");
+    } finally {
+      setSculpting(false);
+    }
+  };
 
   const handleSave = async () => {
     if (!profile || saving) return;
@@ -358,6 +397,79 @@ export default function AiContextPage() {
               />
             </div>
           </section>
+
+          {/* Business context (Sculptor) */}
+          <section className="border border-gray-200 rounded-sm p-6">
+            <div className="mb-5 flex items-start justify-between gap-4">
+              <div>
+                <h2 className="text-[13px] font-semibold text-[#0A0A0A]">
+                  Business context
+                </h2>
+                <p className="mt-1 text-[12px] text-gray-500 leading-relaxed max-w-[440px]">
+                  A description of what your company does and its
+                  sustainability-relevant footprint. The AI assistant uses this
+                  to give company-specific answers. Write it yourself, or let
+                  Sculptor research your website and draft it.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={handleSculpt}
+                disabled={sculpting || saving}
+                title="Research your company and generate business context"
+                className="flex-shrink-0 inline-flex items-center gap-2 border border-[#074D47] text-[#074D47] hover:bg-[#074D47]/[0.04] disabled:opacity-50 disabled:cursor-not-allowed px-4 py-2.5 rounded-sm text-[12px] tracking-wider uppercase font-medium transition-colors"
+              >
+                {sculpting ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Wand2 className="h-4 w-4" />
+                )}
+                {sculpting ? "Researching…" : "Generate with Sculptor"}
+              </button>
+            </div>
+
+            <textarea
+              id="business-context"
+              value={profile.businessContext}
+              onChange={(e) => update({ businessContext: e.target.value })}
+              maxLength={8000}
+              rows={12}
+              disabled={saving || sculpting}
+              placeholder="e.g. Acme Components manufactures precision metal parts for the automotive sector from two sites in Germany…"
+              className={`${inputClass} resize-y font-[inherit] leading-relaxed`}
+            />
+            <div className="mt-1.5 flex items-center justify-between">
+              <span className="text-[11px] text-gray-400">
+                {profile.businessContext.length.toLocaleString()} / 8,000
+              </span>
+              {sculptSources.length > 0 && (
+                <span className="text-[11px] text-gray-400">
+                  Researched {sculptSources.length} source
+                  {sculptSources.length === 1 ? "" : "s"}
+                </span>
+              )}
+            </div>
+
+            {sculptSources.length > 0 && (
+              <div className="mt-3 border-t border-gray-100 pt-3">
+                <span className={labelClass}>Sources</span>
+                <ul className="space-y-1">
+                  {sculptSources.slice(0, 8).map((src) => (
+                    <li key={src} className="truncate">
+                      <a
+                        href={src}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-[12px] text-[#074D47] hover:underline"
+                      >
+                        {src}
+                      </a>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </section>
         </div>
 
         {/* Save bar */}
@@ -370,7 +482,7 @@ export default function AiContextPage() {
           <button
             type="button"
             onClick={handleSave}
-            disabled={saving || !dirty}
+            disabled={saving || sculpting || !dirty}
             className="bg-[#074D47] hover:bg-[#22867C] disabled:bg-gray-300 disabled:cursor-not-allowed text-white px-6 py-3 rounded-sm transition-colors text-[13px] tracking-wider uppercase font-medium flex items-center justify-center gap-2"
           >
             {saving && <Loader2 className="w-4 h-4 animate-spin" />}

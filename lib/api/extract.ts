@@ -6,6 +6,7 @@
 
 import { dashboardFetch } from "@/lib/dashboard/client-fetch";
 import { readNdjson } from "@/lib/ndjson";
+import type { DocumentClassification } from "@/lib/types/document-classification";
 
 export interface ProposedParameter {
   code: string;
@@ -29,6 +30,7 @@ export interface ProposedDataPoint {
 
 export interface ExtractionProposal {
   period: { code: string; label: string; start_date?: string; end_date?: string };
+  classification?: DocumentClassification;
   parameters: ProposedParameter[];
   data_points: ProposedDataPoint[];
   notes?: string;
@@ -106,6 +108,7 @@ export interface RecordedParameter {
   unit: string;
   category: string;
   section: string;
+  value: number | null;
 }
 
 export interface ExtractionDocumentSummary {
@@ -116,6 +119,7 @@ export interface ExtractionDocumentSummary {
   created_at: string;
   period_code: string | null;
   parameters: RecordedParameter[];
+  classification: DocumentClassification | null;
 }
 
 export async function listExtractionDocuments(): Promise<ExtractionDocumentSummary[]> {

@@ -34,6 +34,41 @@ function sectionTitle(section: string): string {
     .join(" ");
 }
 
+// Build data-aware starter prompts from whatever metrics the org has actually
+// extracted, so the omnibar advertises questions that will return real data
+// instead of generic placeholders. Falls back to nothing (AiSearchBar then
+// shows its own defaults) when there are no metrics yet.
+function buildSuggestions(metrics: Record<string, CurrentMetricRow[]>): string[] {
+  const rows = Object.values(metrics).flat();
+  if (rows.length === 0) return [];
+
+  const suggestions: string[] = [];
+  const named = rows.filter((r) => r.display_name).slice(0, 4);
+
+  // 1) Trend a real metric over time.
+  if (named[0]) suggestions.push(`Show ${named[0].display_name.toLowerCase()} through the year`);
+
+  // 2) Compare two real metrics, when available.
+  if (named[1]) {
+    suggestions.push(
+      `Compare ${named[0].display_name.toLowerCase()} and ${named[1].display_name.toLowerCase()}`,
+    );
+  }
+
+  // 3) Summarize a whole section the user owns.
+  const sectionNames = Object.keys(metrics).filter((s) => (metrics[s] ?? []).length > 0);
+  if (sectionNames[0]) {
+    suggestions.push(`Summarize my ${sectionTitle(sectionNames[0]).toLowerCase()} metrics`);
+  }
+
+  // 4) A couple more single-metric plots for breadth.
+  for (const r of named.slice(2)) {
+    suggestions.push(`Plot ${r.display_name.toLowerCase()}`);
+  }
+
+  return suggestions.slice(0, 5);
+}
+
 export function CatalogueOverview() {
   const qc = useQueryClient();
   const { user } = useAppStore();
@@ -83,27 +118,55 @@ export function CatalogueOverview() {
   const data = metricsQ.data;
   const sections = data ? Object.keys(data.metrics) : [];
   const hasMetrics = sections.length > 0;
+  const suggestions = data ? buildSuggestions(data.metrics) : [];
 
   return (
     <div className="bg-white min-h-screen">
-      <div className="px-6 py-6 space-y-8 max-w-[1600px] mx-auto">
+      {/* ── Hero band ─────────────────────────────────────────────────
+          Centered intro: big headline, one large AI box, and data-aware
+          starter prompts so the user immediately knows what they can ask. */}
+      <div className="border-b border-[#1F5F5B]/10 bg-white">
+        <div className="px-6 pt-12 pb-10 max-w-3xl mx-auto text-center">
+          <p className="text-[12px] font-medium uppercase tracking-[0.18em] text-[#1F5F5B]/70">
+            {user?.companyName || "Your organization"}
+            {data?.period?.label ? ` · ${data.period.label}` : ""}
+          </p>
+          <h1 className="mt-3 text-[#0A0A0A] text-3xl sm:text-4xl font-bold tracking-tight leading-tight">
+            Explore your sustainability data
+          </h1>
+          <p className="mt-2 text-[15px] leading-relaxed text-[#3A4A47]">
+            {hasMetrics
+              ? "Ask a question in plain language to start creating graphs — then pin them here to monitor your sustainability performance."
+              : "Once your data is entered, you can create charts and graphs and pin them here to monitor your sustainability performance."}
+          </p>
+
+          <div className="mt-7 text-left">
+            <AiSearchBar
+              hero
+              suggestions={suggestions}
+              pinnedSpecKeys={pinnedSpecKeys}
+              onPinned={onPinned}
+            />
+          </div>
+        </div>
+      </div>
+
+      <div className="px-6 py-8 space-y-8 max-w-[1600px] mx-auto">
         <header className="flex items-center justify-between gap-6">
           <div>
-            <h1 className="text-[#0A0A0A] text-2xl font-bold tracking-tight leading-tight">
-              Sustainability Dashboard
-            </h1>
-            <p className="text-[#1F5F5B] text-sm mt-1">
-              {user?.companyName || "Your organization"}
-              {data?.period?.label ? ` · ${data.period.label}` : ""}
+            <h2 className="text-[#0A0A0A] text-lg font-semibold tracking-tight leading-tight">
+              Your dashboard
+            </h2>
+            <p className="text-[#0A0A0A]/50 text-sm mt-0.5">
+              Pinned charts and committed metrics
             </p>
           </div>
           <Button variant="outline" size="sm" onClick={() => recalc.mutate()} disabled={recalc.isPending}>
-            {recalc.isPending ? "Recalculating…" : "Recalculate"}
+            {recalc.isPending ? "Syncing…" : "Sync"}
           </Button>
         </header>
 
         <section className="space-y-4">
-          <AiSearchBar pinnedSpecKeys={pinnedSpecKeys} onPinned={onPinned} />
           <DashboardGrid onChange={onGridChange} />
         </section>
 
@@ -115,13 +178,6 @@ export function CatalogueOverview() {
 
         {metricsQ.isLoading && !data && (
           <div className="text-sm text-[#0A0A0A]/60">Loading metrics…</div>
-        )}
-
-        {data && !hasMetrics && (
-          <div className="border border-[#0A0A0A]/10 bg-[#F5F4F0] text-sm px-4 py-6">
-            No metrics yet — <strong>upload a document</strong> to populate your dashboard, then click{" "}
-            <strong>Recalculate</strong>.
-          </div>
         )}
 
         {hasMetrics && sections.map((section) => {

@@ -135,5 +135,6 @@ export interface ExtractionDocument {
   mime_type: string;
   status: "pending" | "committed" | "failed";
   proposal: unknown | null;
+  classification: import("@/lib/types/document-classification").DocumentClassification | null;
   created_at: string;
 }

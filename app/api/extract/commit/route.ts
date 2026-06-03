@@ -10,6 +10,10 @@ import { NextResponse } from "next/server";
 import { getSupabaseServiceClient } from "@/lib/supabase/server";
 import { resolveOrgId } from "@/lib/dashboard/auth";
 import { isAllowedSection } from "@/lib/metrics/param-sections";
+import {
+  normalizeClassification,
+  type DocumentClassification,
+} from "@/lib/types/document-classification";
 
 export const runtime = "nodejs";
 
@@ -42,6 +46,7 @@ interface ProposedFormula {
 
 interface ExtractionProposal {
   period: { code: string; label: string; start_date?: string; end_date?: string };
+  classification?: DocumentClassification;
   parameters: ProposedParameter[];
   data_points: ProposedDataPoint[];
   formulas?: ProposedFormula[];
@@ -94,6 +99,31 @@ export async function POST(req: Request) {
     .single();
   if (periodErr || !period) {
     return NextResponse.json({ error: `Period upsert failed: ${periodErr?.message}` }, { status: 500 });
+  }
+
+  // 1b. Promote the just-committed period to the org's current period. Without
+  // this, is_current stays at its `false` default and every "current" lookup
+  // (recalculate, /api/metrics, output-parameters) finds no period — the recalc
+  // route then fails with "No current reporting period". Clear the flag on the
+  // org's other periods first so we never transiently violate the per-org
+  // single-current unique index (reporting_periods_only_one_current_per_org).
+  {
+    const { error: clearErr } = await supabase
+      .from("reporting_periods")
+      .update({ is_current: false })
+      .eq("org_id", orgId)
+      .eq("is_current", true)
+      .neq("id", period.id);
+    if (clearErr) {
+      return NextResponse.json({ error: `Failed to clear current period: ${clearErr.message}` }, { status: 500 });
+    }
+    const { error: setErr } = await supabase
+      .from("reporting_periods")
+      .update({ is_current: true })
+      .eq("id", period.id);
+    if (setErr) {
+      return NextResponse.json({ error: `Failed to set current period: ${setErr.message}` }, { status: 500 });
+    }
   }
 
   // 2. Upsert parameters (dedup on org_id,code).
@@ -182,11 +212,19 @@ export async function POST(req: Request) {
     }
   }
 
-  // 6. Mark the document committed.
+  // 6. Mark the document committed. Persist the (normalized) classification in
+  // its own column so the upload history can read it directly; null when the
+  // proposal carried no valid classification.
   if (body.documentId) {
+    const classification = normalizeClassification(proposal.classification);
     await supabase
       .from("extraction_documents")
-      .update({ status: "committed", period_id: period.id, proposal })
+      .update({
+        status: "committed",
+        period_id: period.id,
+        proposal,
+        classification,
+      })
       .eq("id", body.documentId)
       .eq("org_id", orgId);
   }

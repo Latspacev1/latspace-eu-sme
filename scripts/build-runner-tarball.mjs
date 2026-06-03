@@ -20,7 +20,7 @@
 
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { cpSync, mkdtempSync, readFileSync, rmSync, existsSync, statSync } from "node:fs";
+import { cpSync, mkdtempSync, readFileSync, renameSync, rmSync, existsSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -129,19 +129,37 @@ try {
   console.log(`Found linux-x64 binary at ${linuxBinary}`);
 
   // Step 3: tar it up. Contents are at the top level (no wrapping dir) so
-  // the sandbox extracts them directly into /vercel/sandbox. We invoke tar
-  // with cwd=stagingRunner and a relative output path: passing an absolute
-  // Windows path with a drive letter (e.g. C:\foo) breaks GNU tar, which
-  // parses it as a remote machine path.
+  // the sandbox extracts them directly into /vercel/sandbox.
+  //
+  // Portability: we create the archive INSIDE the staging dir under a plain
+  // relative name (no drive letter, no colon), then move it to the repo root.
+  // This sidesteps the one cross-tar-flavor footgun on Windows — passing an
+  // absolute path like "C:\foo.tar.gz" as the archive name. GNU tar reads the
+  // colon as a remote-host separator (needs --force-local to disable), while
+  // the bsdtar that ships with Windows 10/11 does NOT understand --force-local
+  // at all. Keeping the archive name relative makes both happy, so no
+  // flavor-specific flag is required.
   console.log(`Creating ${tarballName}...`);
-  // GNU tar's --force-local flag tells it to treat colons as file-name
-  // characters rather than remote-host separators — required on Windows
-  // where bsdtar/gnutar will otherwise see "C:\path" as host=C path=\path.
+  const stagedTarball = join(stagingRunner, tarballName);
+  // Exclude the archive itself in case tar walks "." while writing it.
   run(
     "tar",
-    ["--force-local", "-czf", tarballPath, "."],
+    ["--exclude", `./${tarballName}`, "-czf", tarballName, "."],
     stagingRunner
   );
+  // Move it out of staging to the repo root (staging is removed in finally).
+  // rename() can fail with EXDEV when the temp dir and repo are on different
+  // volumes (e.g. a RAM-disk tmpdir); fall back to copy + delete.
+  try {
+    renameSync(stagedTarball, tarballPath);
+  } catch (err) {
+    if (err && err.code === "EXDEV") {
+      cpSync(stagedTarball, tarballPath);
+      rmSync(stagedTarball, { force: true });
+    } else {
+      throw err;
+    }
+  }
 
   const stats = statSync(tarballPath);
   const sizeMb = (stats.size / 1024 / 1024).toFixed(1);

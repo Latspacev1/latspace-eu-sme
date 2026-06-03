@@ -121,7 +121,7 @@ export async function handleChat(job: ChatJob, emit: EmitFn): Promise<void> {
     prompt: historyAsPrompt(job.messages, job.context ?? null),
     options: {
       model: "claude-opus-4-7",
-      systemPrompt: getSystemPrompt(framework, "chat"),
+      systemPrompt: getSystemPrompt(framework, "chat", job.businessContext),
       mcpServers: { [framework]: mcpServer },
       allowedTools: [toolSearchGuidance(framework), "WebSearch", "WebFetch"],
       tools: ["WebSearch", "WebFetch"],

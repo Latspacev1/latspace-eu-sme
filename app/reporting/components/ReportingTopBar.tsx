@@ -12,8 +12,6 @@ interface ReportingTopBarProps {
   /** Optional — when absent, the Autofill button is hidden. */
   onAutofill?: () => void;
   autofillDisabled?: boolean;
-  /** Optional — when provided, renders a top-right Sync button. */
-  onSync?: () => void;
 }
 
 export function ReportingTopBar({
@@ -25,7 +23,6 @@ export function ReportingTopBar({
   onStatus,
   onAutofill,
   autofillDisabled,
-  onSync,
 }: ReportingTopBarProps) {
   return (
     <div className="flex items-center gap-3 mb-6 flex-wrap">
@@ -81,28 +78,6 @@ export function ReportingTopBar({
             className="rounded-md bg-brand px-4 py-2 text-sm font-medium text-white hover:bg-brand/90 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             Autofill
-          </button>
-        )}
-        {onSync && (
-          <button
-            onClick={onSync}
-            title="Refresh progress from saved answers"
-            className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
-          >
-            <svg
-              viewBox="0 0 24 24"
-              className="h-4 w-4"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-            >
-              <path
-                d="M21 12a9 9 0 0 1-15.36 6.36L3 16M3 12a9 9 0 0 1 15.36-6.36L21 8M21 3v5h-5M3 21v-5h5"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            </svg>
-            Sync
           </button>
         )}
       </div>
