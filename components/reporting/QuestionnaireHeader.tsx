@@ -10,7 +10,7 @@ interface QuestionnaireHeaderProps {
   onExport: () => Promise<void>;
   /** Optional — when absent (local-mode frameworks) the Autofill button is hidden. */
   onAutofill?: () => Promise<void>;
-  /** Optional — when absent the Sync button is hidden. */
+  /** Optional — when absent the "Fill with AI" button is hidden. */
   onSync?: () => Promise<void>;
 }
 
@@ -65,13 +65,17 @@ export function QuestionnaireHeader({ overallPct, activeId, frameworkName, versi
           <button
             onClick={handleSync}
             disabled={syncingData}
-            className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
-            title="Sync"
+            className="inline-flex items-center gap-1.5 rounded-md border border-brand/30 bg-brand/5 px-3 py-1.5 text-sm font-medium text-brand hover:bg-brand/10 disabled:cursor-not-allowed disabled:opacity-60"
+            title="Compute VSME metrics from your extracted data and fill the report"
           >
             <svg viewBox="0 0 24 24" className={`h-4 w-4 ${syncingData ? "animate-spin" : ""}`} fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M21 12a9 9 0 0 1-15.36 6.36L3 16M3 12a9 9 0 0 1 15.36-6.36L21 8M21 3v5h-5M3 21v-5h5" strokeLinecap="round" strokeLinejoin="round" />
+              {syncingData ? (
+                <path d="M21 12a9 9 0 0 1-15.36 6.36L3 16M3 12a9 9 0 0 1 15.36-6.36L21 8M21 3v5h-5M3 21v-5h5" strokeLinecap="round" strokeLinejoin="round" />
+              ) : (
+                <path d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16 2.4 6.6L22 12l-6.6 2.4L13 21l-2.4-6.6L4 12l6.6-2.4L13 3Z" strokeLinecap="round" strokeLinejoin="round" />
+              )}
             </svg>
-            {syncingData ? "Syncing…" : "Sync"}
+            {syncingData ? "Filling…" : "Fill with AI"}
           </button>
         )}
         <button

@@ -9,10 +9,18 @@ import { QuestionPanel } from "@/components/reporting/QuestionPanel";
 import { AssistantPane as QualitativeAssistantPane } from "@/components/reporting/qualitative/AssistantPane";
 import { ConfirmDialog, type ConfirmDialogState } from "@/components/reporting/ConfirmDialog";
 import { OutputParametersTab } from "@/components/reporting/OutputParametersTab";
+import { fillVsmeReport, type FillResult } from "@/lib/api/reportingFill";
+import { toast } from "sonner";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
 export type Status = "not-started" | "in-progress" | "completed";
+
+export interface AiFillMarker {
+  confidence?: number;
+  code?: string;
+  at: string;
+}
 
 export interface QuestionState {
   values: RowValues;
@@ -20,6 +28,8 @@ export interface QuestionState {
   status: Status;
   updatedAt?: string;
   comment?: string;
+  /** Keyed by fieldId — fields whose value was placed by the AI fill agent. */
+  aiFilled?: Record<string, AiFillMarker>;
 }
 
 export interface QuestionnaireConfig {
@@ -318,15 +328,105 @@ export function Questionnaire({ config, initialQuestionId: initialQuestionIdProp
       .filter((s) => s.questions.length > 0);
   }
 
-  // No server-side autofill in the local-storage-only mode — kept as a no-op
-  // because QuestionPanel's prop type still expects an `onSectionSync`.
+  // No per-question server-side autofill — kept as a no-op because
+  // QuestionPanel's prop type still expects an `onSectionSync`.
   const onSectionSync = useCallback(async () => {}, []);
 
-  // Sync — functionality to be defined. Wired here so the header's Sync button
-  // (next to Export) has a handler to call.
+  // Write AI-computed values into the answers. Skips fields the user already
+  // filled by hand (clobber protection) but overwrites prior AI fills so a
+  // re-run refreshes them. Each filled field gets an `aiFilled` marker.
+  const applyAiFills = useCallback(
+    (fills: FillResult[]) => {
+      if (!fills.length) return 0;
+      let applied = 0;
+      setAnswers((prev) => {
+        const next = { ...prev };
+        for (const f of fills) {
+          if (f.value == null || !f.field_id) continue;
+          const found = allQuestions.find((x) => x.q.id === f.question_id);
+          if (!found || found.q.kind !== "fields") continue; // table fills unsupported in v1
+          const field = found.q.fields.find((fld) => fld.id === f.field_id);
+          if (!field) continue;
+          const current = next[f.question_id] ?? blankState(found.q);
+          const existing = current.values[f.field_id];
+          const wasAiFilled = !!current.aiFilled?.[f.field_id];
+          // Don't clobber a manual answer; do refresh a prior AI fill.
+          if (isFilled(field, existing) && !wasAiFilled) continue;
+          const values = { ...current.values, [f.field_id]: f.value };
+          const aiFilled = {
+            ...(current.aiFilled ?? {}),
+            [f.field_id]: { confidence: f.confidence, code: f.code, at: new Date().toISOString() },
+          };
+          const merged: QuestionState = { ...current, values, aiFilled };
+          next[f.question_id] = {
+            ...merged,
+            status: merged.status === "completed" ? "completed" : deriveStatus(found.q, merged),
+            updatedAt: new Date().toISOString(),
+          };
+          applied++;
+        }
+        return next;
+      });
+      return applied;
+    },
+    [allQuestions],
+  );
+
+  const [filling, setFilling] = useState(false);
+
+  // "Fill with AI" — derives VSME output metrics from the org's extracted data
+  // (server-side), then places the computed values into the answers. VSME-only.
   const handleSync = useCallback(async () => {
-    // TODO: implement Sync behavior.
-  }, []);
+    if (filling) return;
+    if (config.frameworkId !== "vsme") {
+      toast.info("AI fill is available for the VSME Digital Template.");
+      return;
+    }
+    setFilling(true);
+    // Fields the user has already filled — sent so the agent skips them.
+    const filledFields: { questionId: string; fieldId: string }[] = [];
+    for (const { q } of allQuestions) {
+      if (q.kind !== "fields") continue;
+      const a = answers[q.id];
+      if (!a) continue;
+      for (const fld of q.fields) {
+        if (isFilled(fld, a.values[fld.id]) && !a.aiFilled?.[fld.id]) {
+          filledFields.push({ questionId: q.id, fieldId: fld.id });
+        }
+      }
+    }
+    const toastId = toast.loading("Reading your data and computing VSME metrics…");
+    try {
+      await fillVsmeReport({
+        filledFields,
+        onEvent: (ev) => {
+          if (ev.event === "activity") {
+            const d = ev.data as { label?: string; detail?: string };
+            if (d?.label) toast.loading(d.detail ? `${d.label}: ${d.detail}` : d.label, { id: toastId });
+          } else if (ev.event === "fills") {
+            const payload = ev.data as {
+              fills: FillResult[];
+              committed: { formulas: number };
+              skipped: { vsme_cell: string; reason: string }[];
+            };
+            const applied = applyAiFills(payload.fills);
+            const skipped = payload.skipped?.length ?? 0;
+            toast.success(
+              `Filled ${applied} field${applied === 1 ? "" : "s"} from ${payload.committed.formulas} formula${payload.committed.formulas === 1 ? "" : "s"}${skipped ? ` · ${skipped} skipped` : ""}.`,
+              { id: toastId },
+            );
+          } else if (ev.event === "error") {
+            const d = ev.data as { message?: string };
+            toast.error(d?.message ?? "Fill failed.", { id: toastId });
+          }
+        },
+      });
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Fill failed.", { id: toastId });
+    } finally {
+      setFilling(false);
+    }
+  }, [filling, config.frameworkId, allQuestions, answers, applyAiFills]);
 
   if (!active) {
     return <div className="flex h-full items-center justify-center text-sm text-slate-400">No questions available.</div>;
@@ -378,6 +478,18 @@ export function Questionnaire({ config, initialQuestionId: initialQuestionIdProp
       totalFields,
       preview: preview.trim().slice(0, 200) || undefined,
     };
+  })();
+
+  // AI-fill badge for the active question: present when any field was placed by
+  // the fill agent; value = min confidence across those fields (or null if no
+  // confidences were reported but fields were AI-filled).
+  const activeAutofillConfidence = (() => {
+    const marks = answers[active.q.id]?.aiFilled;
+    if (!marks || Object.keys(marks).length === 0) return null;
+    const confs = Object.values(marks)
+      .map((m) => m.confidence)
+      .filter((c): c is number => typeof c === "number");
+    return confs.length ? Math.min(...confs) : 0.8;
   })();
 
   return (
@@ -464,6 +576,7 @@ export function Questionnaire({ config, initialQuestionId: initialQuestionIdProp
           computeCtx={computeCtx}
           FieldsForm={FieldsForm}
           onSectionSync={onSectionSync}
+          autofillConfidence={activeAutofillConfidence}
         />
         {panes.rightCollapsed ? (
           <CollapsedRail side="right" label="AI Assistant" onExpand={() => setPanes((p) => ({ ...p, rightCollapsed: false }))} />

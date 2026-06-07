@@ -54,16 +54,28 @@ export async function handleExtract(job: ExtractJob, emit: EmitFn): Promise<void
 
   const existingText =
     job.existingParameters && job.existingParameters.length
-      ? `Existing parameters for this organization — reuse these exact codes when a metric matches, do not create duplicates:\n${job.existingParameters
+      ? `Existing parameters for this organization — when a metric you find means the SAME thing as one of these, reuse its EXACT code verbatim (do not create a near-duplicate):\n${job.existingParameters
           .map((p) => `- ${p.code} | ${p.display_name} | ${p.unit} | ${p.section}`)
           .join("\n")}`
       : "This organization has no parameters yet — propose fresh codes.";
+
+  // Coding conventions keep codes stable across uploads so the same metric does
+  // not fragment into electricity_consumption_total_kwh vs ..._total.
+  const codingRules = [
+    "Parameter code rules (follow exactly):",
+    "- Match by MEANING, not spelling: if a metric equals an existing one above, output that existing code character-for-character — even if your wording or the document's wording differs.",
+    "- Never append the unit to the code. Use electricity_consumption_total, NOT electricity_consumption_total_kwh. The unit goes in the `unit` field only.",
+    "- snake_case, lowercase, no trailing qualifiers like _annual/_total_kwh; put the quantity word (total/net) before, units never.",
+    "- Reuse a code across months/documents for the same metric; only the data point's value/period changes.",
+  ].join("\n");
 
   const instruction = `The uploaded document is "${job.filename}".${
     job.periodHint ? ` The user suggests it covers period "${job.periodHint}".` : ""
   }
 
 ${existingText}
+
+${codingRules}
 
 Read the whole document, then call propose_extraction exactly once with every quantitative metric you find. Use "${job.filename}" as the source_file on each data point.`;
 

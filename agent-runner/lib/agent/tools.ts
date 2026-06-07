@@ -61,6 +61,36 @@ export interface ExtractionProposal {
   notes?: string;
 }
 
+// ── Fill proposal contract (fill mode) ───────────────────────────────────────
+// The agent derives VSME output metrics from the org's measured inputs. It
+// proposes the output parameters to create (each pinned to a VSME cell) and the
+// formula that produces each, expressed over input parameter codes. Mirrored
+// app-side by lib/metrics/commitProposal.ts.
+export interface ProposedOutputParameter {
+  code: string;
+  display_name: string;
+  unit: string;
+  section: string;
+  vsme_cell: string; // "<Sheet>!<Cell>" — the template cell this metric fills
+}
+
+export interface ProposedFillFormula {
+  output_param_code: string;
+  expression: string; // arithmetic over input parameter codes, e.g. "kwh * factor"
+  dependencies: string[]; // every identifier used in `expression`
+  expression_human?: string;
+  description?: string;
+  confidence?: number; // 0–1, the agent's confidence in this derivation
+}
+
+export interface FillProposal {
+  period: { code: string; label: string };
+  output_parameters: ProposedOutputParameter[];
+  formulas: ProposedFillFormula[];
+  skipped?: { vsme_cell: string; reason: string }[];
+  notes?: string;
+}
+
 interface AgentMcpOptions {
   // Called once per `search_guidance` invocation with the surfaced sources, so
   // the runner can stream them to the client as a `retrieved` NDJSON event.
@@ -73,6 +103,9 @@ interface AgentMcpOptions {
   // Extract mode only. When provided, the propose_extraction tool is
   // registered and forwards the proposal for the runner to emit.
   onExtraction?: (proposal: ExtractionProposal) => void;
+  // Fill mode only. When provided, the propose_fill tool is registered and
+  // forwards the proposal for the runner to emit.
+  onFill?: (proposal: FillProposal) => void;
 }
 
 // Per-framework descriptors used to build the `search_guidance` tool's
@@ -340,6 +373,73 @@ export function createAgentMcpServer(framework: Framework, opts: AgentMcpOptions
     tools.push(proposeExtraction);
   }
 
+  if (opts.onFill) {
+    const onFill = opts.onFill;
+
+    const proposedOutputParameter = z.object({
+      code: z.string().min(1).describe("snake_case identifier for the output metric, e.g. 'vsme_b3_scope2_location'. Reuse an existing output code verbatim if one matches."),
+      display_name: z.string().min(1),
+      unit: z.string().describe("Unit of the computed metric, e.g. 'kWh', 'tCO2e', 'm3', '%'. Must be consistent with the formula."),
+      section: z.enum(ALLOWED_SECTIONS).describe("The output param_section this metric belongs to (e.g. vsme_b3_scope2, vsme_b6_water)."),
+      vsme_cell: z.string().regex(/^.+!.+$/, "must be '<Sheet>!<Cell>'").describe("The VSME template cell this metric fills, taken verbatim from a target's vsme_cell (e.g. 'Environmental Disclosures!D42')."),
+    });
+
+    const proposedFillFormula = z.object({
+      output_param_code: z.string().min(1).describe("Must match a code in output_parameters (proposed here) or an existing output parameter."),
+      expression: z.string().min(1).describe("Arithmetic over INPUT parameter codes only, using + - * / ( ) — NO functions, conditionals, or units. e.g. 'electricity_kwh * grid_emission_factor'. Every identifier must be an existing input/emission_factor code or another defined output code."),
+      dependencies: z.array(z.string()).describe("Every identifier used in `expression`. The platform marks dependent metrics stale when any of these inputs change."),
+      expression_human: z.string().optional().describe("Human-readable form, e.g. '638,724 kWh × 0.233 kgCO2e/kWh'."),
+      description: z.string().optional().describe("1-2 sentence methodology note, ideally citing the VSME guidance section."),
+      confidence: z.number().min(0).max(1).optional().describe("Your confidence (0–1) that this derivation is correct."),
+    });
+
+    const proposeFill = tool(
+      "propose_fill",
+      "Submit the VSME output metrics you derived from the org's measured inputs. Call this EXACTLY ONCE, at the end, after you have searched the guidance for the methodology behind each metric. For every target you can derive, provide an output parameter (pinned to its vsme_cell) and a formula expressed over input parameter codes. Skip targets you cannot derive and list them in `skipped`. Never invent input values.",
+      {
+        period: z.object({
+          code: z.string().min(1),
+          label: z.string().min(1),
+        }),
+        output_parameters: z.array(proposedOutputParameter).describe("One per derivable target. Pin each to the target's vsme_cell."),
+        formulas: z.array(proposedFillFormula).describe("One per output parameter, expressed over input codes."),
+        skipped: z
+          .array(z.object({ vsme_cell: z.string(), reason: z.string() }))
+          .optional()
+          .describe("Targets you could not derive (missing inputs, no methodology, etc.) with a short reason."),
+        notes: z.string().optional().describe("Anything ambiguous the reviewer should know."),
+      },
+      async (args) => {
+        // Warn (don't reject) when a formula references an output not declared
+        // here — it may be an existing org parameter. The app-side commit route
+        // re-validates against the catalogue and topologically sorts.
+        const outputCodes = new Set(args.output_parameters.map((p) => p.code));
+        const formulaCodes = new Set(args.formulas.map((f) => f.output_param_code));
+        const paramsWithoutFormula = [...outputCodes].filter((c) => !formulaCodes.has(c));
+        onFill({
+          period: args.period,
+          output_parameters: args.output_parameters,
+          formulas: args.formulas,
+          skipped: args.skipped,
+          notes: args.notes,
+        });
+        const warn = paramsWithoutFormula.length
+          ? ` Note: ${paramsWithoutFormula.length} output parameter(s) have no formula and will not produce a value.`
+          : "";
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: `Fill proposal accepted (${args.output_parameters.length} output parameters, ${args.formulas.length} formulas, ${args.skipped?.length ?? 0} skipped). The platform will compute and place the values.${warn}`,
+            },
+          ],
+        };
+      }
+    );
+
+    tools.push(proposeFill);
+  }
+
   return createSdkMcpServer({
     name: framework,
     version: "1.0.0",
@@ -357,4 +457,7 @@ export function toolProposeInsert(framework: Framework): string {
 }
 export function toolProposeExtraction(framework: Framework): string {
   return `mcp__${framework}__propose_extraction`;
+}
+export function toolProposeFill(framework: Framework): string {
+  return `mcp__${framework}__propose_fill`;
 }

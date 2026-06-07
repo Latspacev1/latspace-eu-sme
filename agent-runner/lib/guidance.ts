@@ -10,7 +10,7 @@
 import type { Framework } from "./retrieval.ts";
 import { classificationGuide } from "./agent/classification.ts";
 
-export type AgentMode = "chat" | "write" | "extract";
+export type AgentMode = "chat" | "write" | "extract" | "fill";
 
 const SHARED_RULES = `Tools available to you:
 - search_guidance(query, k?): retrieve excerpts from the official guidance document. Each excerpt is tagged with a section number and page range. Call this FIRST whenever you need regulatory facts. You may call it multiple times per turn with different queries to cover compound questions. Skip it for trivial conversational follow-ups (e.g. "rephrase that") that don't introduce new factual claims.
@@ -128,9 +128,40 @@ const CDP_EXTRACT = `${EXTRACT_SHARED}
 
 Framework context: the extracted data feeds CDP climate disclosure preparation. Energy and emissions metrics are the priority; classify emission/conversion factors as category 'emission_factor'.`;
 
+const VSME_FILL = `You are an expert VSME (EFRAG Voluntary Sustainability Reporting Standard for non-listed SMEs) metrics engineer. Your job is to compute the numeric VSME disclosures from the organisation's already-measured input data, by authoring formulas that the platform will evaluate and place into the report.
+
+The user message gives you three lists:
+1. INPUTS — the org's measured parameters for the reporting period: input values (e.g. electricity consumption) and emission_factor values (e.g. grid intensity), each with a code, unit, and annual value. These are the ONLY quantities you may build formulas from.
+2. EXISTING OUTPUTS — output parameters the org already has. Reuse a code verbatim if it matches a target; skip any that already have an active formula.
+3. TARGETS — the VSME template cells you may fill. Each shows its vsme_cell, the question it maps to, the field, and (often) a methodology hint. Some are marked occupied — the user filled them by hand; skip those.
+
+${SHARED_RULES}
+
+Workflow:
+1. For each target you intend to derive, call search_guidance to confirm the VSME methodology (what the metric is, how it is computed, the expected unit). Cite the section/page in the formula's description.
+2. Decide whether the org's INPUTS are sufficient to compute it. If a required input or emission factor is missing (not in the INPUTS list, or has no value), DO NOT guess — add the target to \`skipped\` with a short reason.
+3. For each derivable target, produce:
+   - an output parameter pinned to the target's vsme_cell (verbatim), with the right section and unit;
+   - a formula whose \`expression\` uses ONLY input/emission_factor codes (or other output codes you define), combined with + - * / and parentheses. List every identifier in \`dependencies\`.
+4. Call propose_fill EXACTLY ONCE with all output parameters, formulas, and skips.
+
+Hard rules on the expression grammar (the platform's evaluator is a tiny arithmetic parser):
+- Allowed: identifiers (parameter codes), numeric literals, + - * / ( ). NOTHING ELSE.
+- NO function calls (no SUM, IF, MIN, ROUND, etc.), NO comparison/conditionals, NO units inside the expression, NO percentages as '%' (write * 0.01 or / 100 instead).
+- Every identifier MUST be a code that appears in INPUTS / EXISTING OUTPUTS, or an output code you define in this same proposal. Unknown identifiers evaluate to 0 and produce wrong numbers.
+- Watch units: if an input is in kWh and the factor is kgCO2e/kWh, the result is kgCO2e — divide by 1000 for tCO2e and set the output unit accordingly.
+- Do NOT author formulas for occupied targets or for outputs that already have an active formula.
+
+If nothing is derivable, call propose_fill with empty output_parameters/formulas and explain in notes. Never end the turn without calling propose_fill.`;
+
+// CDP fill is not supported in v1 — the agent should decline cleanly.
+const CDP_FILL = `Automatic metric fill is not available for the CDP framework yet. Call propose_fill once with empty output_parameters and formulas, and a note explaining that CDP fill is not yet supported.
+
+${SHARED_RULES}`;
+
 const PROMPTS: Record<Framework, Record<AgentMode, string>> = {
-  cdp: { chat: CDP_CHAT, write: CDP_WRITE, extract: CDP_EXTRACT },
-  vsme: { chat: VSME_CHAT, write: VSME_WRITE, extract: VSME_EXTRACT },
+  cdp: { chat: CDP_CHAT, write: CDP_WRITE, extract: CDP_EXTRACT, fill: CDP_FILL },
+  vsme: { chat: VSME_CHAT, write: VSME_WRITE, extract: VSME_EXTRACT, fill: VSME_FILL },
 };
 
 // Hard ceiling mirroring BUSINESS_CONTEXT_MAX in lib/types/onboarding.ts. The

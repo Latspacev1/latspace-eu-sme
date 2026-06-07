@@ -10,6 +10,9 @@ import { NextResponse } from "next/server";
 import { getSupabaseServiceClient } from "@/lib/supabase/server";
 import { resolveOrgId } from "@/lib/dashboard/auth";
 import { isAllowedSection } from "@/lib/metrics/param-sections";
+import { recalculatePeriod } from "@/lib/metrics/recalculate";
+import { invalidateCatalogue } from "@/lib/dashboard/catalogue";
+import { buildCanonicalCodeMap, rewriteExpression, type MatchableParameter } from "@/lib/metrics/paramMatch";
 import {
   normalizeClassification,
   type DocumentClassification,
@@ -126,21 +129,63 @@ export async function POST(req: Request) {
     }
   }
 
-  // 2. Upsert parameters (dedup on org_id,code).
-  if (proposal.parameters.length) {
-    const rows = proposal.parameters.map((p, i) => ({
-      org_id: orgId,
+  // 1c. Canonicalize codes against the org's existing parameters so the same
+  // real-world metric doesn't fragment across drifted codes (e.g.
+  // electricity_consumption_total_kwh vs electricity_consumption_total). We
+  // build a { proposedCode -> canonicalCode } map and rewrite it through the
+  // parameters, data points, and formula dependency lists before any upsert.
+  // A proposal that folds onto an existing code is dropped from the upsert set
+  // so we keep the established parameter's metadata rather than overwriting it.
+  const { data: existingForMatch } = await supabase
+    .from("parameters")
+    .select("code, display_name, unit, section")
+    .eq("org_id", orgId);
+  const existingParams = (existingForMatch ?? []) as MatchableParameter[];
+  const existingCodeSet = new Set(existingParams.map((e) => e.code));
+  const canonicalByCode = buildCanonicalCodeMap(
+    proposal.parameters.map((p) => ({
       code: p.code,
-      display_name: p.display_name || p.code,
+      display_name: p.display_name,
       unit: p.unit ?? "",
-      category: p.category,
       section: p.section,
-      is_monthly: !!p.is_monthly,
-      is_calculated: !!p.is_calculated,
-      display_order: i,
-    }));
-    const { error } = await supabase.from("parameters").upsert(rows, { onConflict: "org_id,code" });
-    if (error) return NextResponse.json({ error: `Parameter upsert failed: ${error.message}` }, { status: 500 });
+    })),
+    existingParams,
+  );
+  const canon = (code: string): string => canonicalByCode.get(code) ?? code;
+  const mergedInto: { from: string; to: string }[] = [];
+  for (const [from, to] of canonicalByCode) {
+    if (from !== to) mergedInto.push({ from, to });
+  }
+
+  // 2. Upsert parameters (dedup on org_id,code). Skip any proposed parameter
+  // whose canonical code is an *existing* row — we don't clobber established
+  // metadata. A proposed param that's new (canonical === its own code) still
+  // upserts; intra-batch twins collapse because they share a canonical code.
+  if (proposal.parameters.length) {
+    const seen = new Set<string>();
+    const rows = proposal.parameters
+      .map((p) => {
+        const code = canon(p.code);
+        if (existingCodeSet.has(code)) return null; // reuse existing row as-is
+        if (seen.has(code)) return null;            // twin already queued
+        seen.add(code);
+        return {
+          org_id: orgId,
+          code,
+          display_name: p.display_name || code,
+          unit: p.unit ?? "",
+          category: p.category,
+          section: p.section,
+          is_monthly: !!p.is_monthly,
+          is_calculated: !!p.is_calculated,
+        };
+      })
+      .filter((r): r is NonNullable<typeof r> => r !== null)
+      .map((r, i) => ({ ...r, display_order: i }));
+    if (rows.length) {
+      const { error } = await supabase.from("parameters").upsert(rows, { onConflict: "org_id,code" });
+      if (error) return NextResponse.json({ error: `Parameter upsert failed: ${error.message}` }, { status: 500 });
+    }
   }
 
   // 3. Resolve every code → parameter id (proposed + pre-existing).
@@ -153,11 +198,18 @@ export async function POST(req: Request) {
 
   // 4. Upsert data points (trigger marks dependent metrics stale).
   const unknownCodes: string[] = [];
-  const dpRows = proposal.data_points
-    .map((d) => {
-      const parameter_id = idByCode.get(d.parameter_code);
+  // Collapse data points by canonical code. If two drifted codes both carry a
+  // value for the same metric in one upload, last-write-wins on the canonical
+  // parameter (rather than two rows that then violate the per-param upsert key).
+  const dpByCanon = new Map<string, (typeof proposal.data_points)[number]>();
+  for (const d of proposal.data_points) {
+    dpByCanon.set(canon(d.parameter_code), d);
+  }
+  const dpRows = [...dpByCanon.entries()]
+    .map(([code, d]) => {
+      const parameter_id = idByCode.get(code);
       if (!parameter_id) {
-        unknownCodes.push(d.parameter_code);
+        unknownCodes.push(code);
         return null;
       }
       return {
@@ -193,14 +245,17 @@ export async function POST(req: Request) {
   if (proposal.formulas?.length) {
     const fRows = proposal.formulas
       .map((f) => {
-        const output_param_id = idByCode.get(f.output_param_code);
+        const output_param_id = idByCode.get(canon(f.output_param_code));
         if (!output_param_id) return null;
         return {
           org_id: orgId,
           output_param_id,
-          expression: f.expression,
+          // Rewrite codes embedded in the expression onto their canonical form,
+          // matching the dependency rewrite below — otherwise the evaluator
+          // resolves a de-duplicated code to 0.
+          expression: rewriteExpression(f.expression, canonicalByCode),
           expression_human: f.expression_human ?? null,
-          dependencies: f.dependencies ?? [],
+          dependencies: (f.dependencies ?? []).map(canon),
           description: f.description ?? null,
         };
       })
@@ -229,10 +284,35 @@ export async function POST(req: Request) {
       .eq("org_id", orgId);
   }
 
+  // 7. Recalculate the period so calculated outputs land in calculated_metrics
+  // (and therefore v_current_metrics). The data_points_mark_stale trigger only
+  // flags rows stale — it does NOT compute values — so without this step any
+  // calculated parameter stays blank everywhere it's read (dashboard charts,
+  // /api/metrics, output-parameters). This mirrors commitFillProposal.
+  // Recalc failure must not lose the already-committed data, so we surface it
+  // as a soft warning rather than a 500.
+  let recalc: { formulas_evaluated: number; errors: { code: string; message: string }[] } | null = null;
+  let recalcError: string | null = null;
+  try {
+    const r = await recalculatePeriod(orgId, period.code);
+    recalc = { formulas_evaluated: r.formulas_evaluated, errors: r.errors };
+  } catch (e) {
+    recalcError = (e as Error).message;
+  }
+
+  // 8. New/changed parameters mean the cached dashboard catalogue is stale —
+  // drop it so the chart agent can reference freshly added codes immediately.
+  invalidateCatalogue(orgId);
+
   return NextResponse.json({
     period: { code: period.code, label: period.label },
     parameters: proposal.parameters.length,
     data_points: dataPointCount,
     formulas: formulaCount,
+    // Codes the de-dup layer folded onto an existing/canonical parameter, so
+    // the UI can tell the user "merged X into Y" instead of silently swallowing.
+    merged: mergedInto,
+    recalc,
+    recalc_error: recalcError,
   });
 }

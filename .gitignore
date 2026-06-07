@@ -142,3 +142,11 @@ storybook-static
 /*.xlsx
 /*.xlsm
 /*.pdf
+
+# Build artifacts and local-only files
+# Agent-runner tarballs are built locally and uploaded to Vercel Blob — never commit.
+agent-runner-*.tar.gz
+# Screenshots dropped in the repo root during development.
+/Screenshot*.png
+# Git bundle export — local artifact, not source.
+*.bundle

@@ -33,6 +33,9 @@ export function describeToolUse(
   if (toolName.endsWith("__propose_extraction")) {
     return { kind: "propose", label: "Proposing extracted metrics" };
   }
+  if (toolName.endsWith("__propose_fill")) {
+    return { kind: "propose", label: "Proposing formulas & metrics" };
+  }
   if (toolName === "WebSearch") {
     const q = typeof args.query === "string" ? args.query : "";
     return { kind: "websearch", label: "Searching the web", detail: q || undefined };

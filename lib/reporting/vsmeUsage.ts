@@ -15,6 +15,11 @@ interface VsmeUsageEntry {
   questionLabel: string;
   sectionId: string;
   sectionTitle: string;
+  // The specific field within the question that this cell maps to. Present for
+  // FieldBindings; null for table bindings (a table cell has no single field id
+  // — the fill flow skips those). Used to place a computed value into the
+  // questionnaire's localStorage answer at answers[questionId].values[fieldId].
+  fieldId: string | null;
 }
 
 let cellIndex: Map<string, VsmeUsageEntry> | null = null;
@@ -32,22 +37,23 @@ function buildIndex(): Map<string, VsmeUsageEntry> {
   for (const b of bindings) {
     const found = questionFor(b.questionId);
     if (!found) continue;
-    const entry: VsmeUsageEntry = {
+    const base = {
       questionId: b.questionId,
       questionLabel: found.question.label,
       sectionId: found.section.id,
       sectionTitle: found.section.title,
     };
     if (b.kind === "field") {
-      out.set(`${b.sheet}!${b.cell}`, entry);
+      out.set(`${b.sheet}!${b.cell}`, { ...base, fieldId: b.fieldId });
     } else {
       // Table bindings span a range — we index each (col, row) up to maxRows
       // so an output that's pinned to e.g. ENV!G42 still resolves to the
-      // question whose table writes column G.
+      // question whose table writes column G. A table cell has no single field
+      // id, so fieldId is null (the fill flow skips these).
       for (let i = 0; i < b.maxRows; i++) {
         const row = b.anchorRow + i * b.rowStride;
         for (const { col } of Object.values(b.columns)) {
-          out.set(`${b.sheet}!${col}${row}`, entry);
+          out.set(`${b.sheet}!${col}${row}`, { ...base, fieldId: null });
         }
       }
     }

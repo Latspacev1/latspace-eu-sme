@@ -12,6 +12,21 @@
 //   - calculated parameters → v_current_metrics (annual) or evaluator
 //     re-run via the same logic the /timeseries endpoint uses (monthly)
 //
+// Robustness notes (these guard against the "chart is blank even though data
+// was entered" class of bugs):
+//   - We classify a series as calculated by `is_calculated`, NOT by `category`.
+//     An extracted parameter can carry category:"output" while still being a
+//     raw input; routing on category sent those to v_current_metrics (which is
+//     empty until a recalc runs) and they came back null. is_calculated is the
+//     property that actually decides whether a formula produces the value.
+//   - A calculated series with no row in v_current_metrics (e.g. recalc hasn't
+//     run yet) falls back to reading data_points directly, so a value that was
+//     entered is still surfaced.
+//   - If a MONTHLY chart is requested but none of the requested series have any
+//     monthly data, we transparently fall back to the ANNUAL shape (one point
+//     per series labelled with the period code) rather than returning 12 empty
+//     months. The renderer paints that as a single-period chart.
+//
 // To keep this file focused, the monthly calculated series re-uses the same
 // topo-sort + evaluator pass the /api/metrics/timeseries route uses.
 
@@ -21,6 +36,13 @@ import type { Parameter, DataPoint, Formula, CurrentMetricRow } from "@/lib/supa
 import type { ChartSpec, ChartData, ChartSeries, ChartSeriesPoint } from "@/lib/dashboard/chart-spec";
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+// A series is "calculated" — i.e. its value comes from a formula, not a raw
+// data point — when the parameter is flagged is_calculated. We deliberately do
+// NOT use category here (see file header).
+function isCalculated(p: Parameter): boolean {
+  return !!p.is_calculated;
+}
 
 export async function fetchChartData(orgId: string, spec: ChartSpec): Promise<ChartData> {
   const supabase = getSupabaseServiceClient();
@@ -33,6 +55,8 @@ export async function fetchChartData(orgId: string, spec: ChartSpec): Promise<Ch
     .maybeSingle();
   if (pErr) throw new Error(pErr.message);
   if (!period) throw new Error(`Period ${spec.period_code} not found`);
+  // Bind a non-null alias so the buildAnnual closure keeps the narrowing.
+  const periodRow = period;
 
   // Pull all parameters once — we need code → metadata + id lookup for
   // both monthly and annual paths.
@@ -45,40 +69,59 @@ export async function fetchChartData(orgId: string, spec: ChartSpec): Promise<Ch
 
   const paramByCode = new Map<string, Parameter>((parameters as Parameter[]).map(p => [p.code, p]));
 
-  if (spec.granularity === "annual") {
+  // ── Annual builder ───────────────────────────────────────────────────────
+  // Used both for an annual request and as the fallback when a monthly request
+  // has no monthly data anywhere. Reads the calculated value from
+  // v_current_metrics, and falls back to data_points.value_annual when the view
+  // has no row (recalc not yet run, or the param is really a raw input).
+  async function buildAnnual(): Promise<ChartData> {
     const series = await Promise.all(spec.parameter_codes.map(async (code) => {
       const param = paramByCode.get(code);
       if (!param) return null;
 
       let value: number | null = null;
-      if (param.category === "output") {
+
+      if (isCalculated(param)) {
         const { data: row } = await supabase
           .from("v_current_metrics")
           .select("value")
           .eq("org_id", orgId)
-          .eq("period_id", period.id)
+          .eq("period_id", periodRow.id)
           .eq("parameter_code", code)
           .maybeSingle<CurrentMetricRow>();
         value = row?.value != null ? Number(row.value) : null;
-      } else {
-        const { data: row } = await supabase
-          .from("data_points")
-          .select("value_annual")
-          .eq("org_id", orgId)
-          .eq("period_id", period.id)
-          .eq("parameter_id", param.id)
-          .maybeSingle();
-        value = row?.value_annual != null ? Number(row.value_annual) : null;
       }
 
-      const points: ChartSeriesPoint[] = [{ label: period.code, value }];
+      // Raw input, OR a calculated param with no computed row yet: read the
+      // entered data point. Also derive annual from monthly if only the monthly
+      // breakdown was entered (sum of present months).
+      if (value == null) {
+        const { data: dp } = await supabase
+          .from("data_points")
+          .select("value_annual, values_monthly")
+          .eq("org_id", orgId)
+          .eq("period_id", periodRow.id)
+          .eq("parameter_id", param.id)
+          .maybeSingle<Pick<DataPoint, "value_annual" | "values_monthly">>();
+        if (dp?.value_annual != null) {
+          value = Number(dp.value_annual);
+        } else if (dp?.values_monthly && dp.values_monthly.some(v => v != null)) {
+          value = dp.values_monthly.reduce<number>((acc, v) => acc + (v != null ? Number(v) : 0), 0);
+        }
+      }
+
+      const points: ChartSeriesPoint[] = [{ label: periodRow.code, value }];
       const out: ChartSeries = { code, display_name: param.display_name, unit: param.unit, points };
       return out;
     }));
     return {
-      period_label: period.label,
+      period_label: periodRow.label,
       series: series.filter((s): s is ChartSeries => !!s),
     };
+  }
+
+  if (spec.granularity === "annual") {
+    return buildAnnual();
   }
 
   // ── Monthly path ─────────────────────────────────────────────────────
@@ -94,7 +137,7 @@ export async function fetchChartData(orgId: string, spec: ChartSpec): Promise<Ch
 
   const annual: Record<string, number> = {};
   for (const p of parameters as Parameter[]) {
-    if (p.category === "output") continue;
+    if (isCalculated(p)) continue;
     const dp = dpByParam.get(p.id);
     if (dp?.value_annual != null) annual[p.code] = Number(dp.value_annual);
   }
@@ -138,21 +181,32 @@ export async function fetchChartData(orgId: string, spec: ChartSpec): Promise<Ch
     }
   }
 
+  // Build the monthly series, tracking whether ANY requested series actually
+  // carried monthly data. If none did, fall back to the annual shape so the
+  // chart paints a single-period view instead of 12 empty months.
   const series: ChartSeries[] = [];
+  let anyMonthlyData = false;
   for (const code of spec.parameter_codes) {
     const param = paramByCode.get(code);
     if (!param) continue;
     let arr: (number | null)[] | undefined;
-    if (param.category === "output") {
+    if (isCalculated(param)) {
       arr = monthlyOutputs[code];
     } else if (param.is_monthly) {
       arr = monthlyInputs[code];
     }
+    if (arr && arr.some(v => v != null)) anyMonthlyData = true;
     const points: ChartSeriesPoint[] = MONTHS.map((label, i) => ({
       label,
       value: arr?.[i] != null ? Number(arr[i]) : null,
     }));
     series.push({ code, display_name: param.display_name, unit: param.unit, points });
+  }
+
+  if (!anyMonthlyData) {
+    // No monthly breakdown for any requested series — degrade to the annual
+    // view so an entered annual value still surfaces (caveat #2/#3).
+    return buildAnnual();
   }
 
   return { period_label: period.label, series };

@@ -51,6 +51,13 @@ export async function loadCatalogue(orgId: string, opts: { fresh?: boolean } = {
   return value;
 }
 
+// Drop the cached catalogue for an org. Call this after a commit that adds or
+// changes parameters/periods (extraction commit, fill commit) so the next chat
+// request sees newly added codes immediately instead of waiting out the TTL.
+export function invalidateCatalogue(orgId: string): void {
+  cache.delete(orgId);
+}
+
 // Render the catalogue as compact text for the LLM system prompt. Kept terse
 // — every kB here is cached but still counts against context.
 export function catalogueToPrompt(cat: DashboardCatalogue): string {

@@ -99,3 +99,57 @@ export interface ExtractJob {
   periodHint?: string;
   existingParameters?: ExistingParameter[];
 }
+
+// ── Fill mode ────────────────────────────────────────────────────────────────
+// The agent reads the org's measured inputs (passed in — the sandbox has no DB
+// key) and authors formulas that derive VSME output metrics, pinning each to a
+// VSME template cell so the app can place the value in the right question/field.
+
+// An input or emission-factor parameter the org already has. `value_annual` is
+// the measured figure for the active period; `has_value` is false when no data
+// point exists (so the agent knows not to build formulas that depend on it).
+export interface FillInputParameter {
+  code: string;
+  display_name: string;
+  unit: string;
+  category: "input" | "emission_factor";
+  section: string;
+  value_annual: number | null;
+  has_value: boolean;
+}
+
+// An output parameter the org already has. `has_active_formula` tells the agent
+// it's already wired up — reuse the code, don't re-author its formula.
+export interface FillExistingOutput {
+  code: string;
+  display_name: string;
+  unit: string;
+  section: string;
+  vsme_cell: string | null;
+  has_active_formula: boolean;
+}
+
+// A derivable VSME cell the agent may target. Derived from the export bindings
+// (lib/reporting/vsmeFillTargets.ts). `occupied` is true when the user has
+// already filled that field by hand — the agent skips it.
+export interface FillTargetCell {
+  vsme_cell: string; // "<Sheet>!<Cell>"
+  question_id: string;
+  question_label: string;
+  section_id: string;
+  section_title: string;
+  field_id: string;
+  methodology_hint?: string;
+  occupied: boolean;
+}
+
+export interface FillJob {
+  mode: "fill";
+  framework?: string;
+  period: { code: string; label: string };
+  inputs: FillInputParameter[];
+  existingOutputs: FillExistingOutput[];
+  targets: FillTargetCell[];
+  // See ChatJob.businessContext — same grounding context.
+  businessContext?: string | null;
+}
