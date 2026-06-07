@@ -17,7 +17,15 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 800;
 
-const ALLOWED_MIME = new Set(["application/pdf", "image/png", "image/jpeg", "image/jpg"]);
+const ALLOWED_MIME = new Set([
+  "application/pdf",
+  "image/png",
+  "image/jpeg",
+  "image/jpg",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", // .xlsx
+  "application/vnd.ms-excel", // .xls
+  "text/csv", // .csv
+]);
 const MAX_BYTES = 20 * 1024 * 1024; // 20 MB
 const SIGNED_URL_TTL = 600; // 10 minutes
 
@@ -44,7 +52,7 @@ export async function POST(req: NextRequest) {
     return ndjsonError("Missing 'file' field");
   }
   if (!ALLOWED_MIME.has(file.type)) {
-    return ndjsonError(`Unsupported file type: ${file.type || "unknown"}. Upload a PDF, PNG, or JPEG.`);
+    return ndjsonError(`Unsupported file type: ${file.type || "unknown"}. Upload a PDF, PNG, JPEG, Excel, or CSV.`);
   }
   if (file.size > MAX_BYTES) {
     return ndjsonError(`File too large (${(file.size / 1024 / 1024).toFixed(1)} MB). Max 20 MB.`);

@@ -118,7 +118,14 @@ ${classificationGuide()}
 Hard rules:
 - NEVER invent or estimate a value that is not printed in the document. If a figure is unclear, omit it and mention it in \`notes\`.
 - Copy numbers exactly as printed (strip thousands separators, keep the decimal value).
-- Do not call any tool other than \`propose_extraction\`.`;
+- Do not call any tool other than \`propose_extraction\`.
+
+Spreadsheets:
+- The document may be a spreadsheet rendered as Markdown tables — one block per sheet, headed \`## Sheet: <name>\`, with a leading row-number column and a column-letter header row (so a cell can be cited as B4 or a range as C4:N4).
+- Read EVERY sheet, not just the first. A metric is often a row or column series: when a row/column carries one value per month (12 periods), populate \`values_monthly\` as a 12-length array in Jan..Dec order and set \`is_monthly\` true; otherwise use \`value_annual\`.
+- Use the row/column header label as the metric's \`display_name\`. Do NOT treat header cells or unit cells as data values.
+- Ignore total/subtotal rows and formula-derived rows that merely re-sum inputs you already captured — capture the underlying inputs instead to avoid double-counting.
+- Provenance: set \`source_sheet\` to the sheet name and \`source_cell\` to the exact cell or range (e.g. 'B4' or 'C4:N4'), and put the verbatim cell text in \`source_excerpt\`.`;
 
 const VSME_EXTRACT = `${EXTRACT_SHARED}
 

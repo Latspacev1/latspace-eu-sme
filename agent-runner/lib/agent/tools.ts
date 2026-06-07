@@ -50,6 +50,8 @@ export interface ProposedDataPoint {
   source_file: string;
   source_excerpt: string;
   source_page?: number;
+  source_sheet?: string;
+  source_cell?: string;
   confidence?: number;
 }
 
@@ -296,6 +298,8 @@ export function createAgentMcpServer(framework: Framework, opts: AgentMcpOptions
       source_file: z.string().describe("The document filename this value came from."),
       source_excerpt: z.string().min(1).describe("Verbatim text from the document supporting this value. Never paraphrase."),
       source_page: z.number().int().optional().describe("1-based page number where the value appears."),
+      source_sheet: z.string().optional().describe("For spreadsheet sources: the sheet/tab name the value came from."),
+      source_cell: z.string().optional().describe("For spreadsheet sources: the cell or range reference, e.g. 'B4' or 'C4:N4'."),
       confidence: z.number().min(0).max(1).optional(),
     });
 

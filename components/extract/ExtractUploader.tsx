@@ -19,6 +19,9 @@ const ACCEPT = {
   "application/pdf": [".pdf"],
   "image/png": [".png"],
   "image/jpeg": [".jpg", ".jpeg"],
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": [".xlsx"],
+  "application/vnd.ms-excel": [".xls"],
+  "text/csv": [".csv"],
 };
 
 export function ExtractUploader({
@@ -93,7 +96,7 @@ export function ExtractUploader({
           Drop utility bills, invoices, or PDFs here
         </div>
         <div className="text-xs text-slate-500">
-          PDF, PNG, or JPEG · up to 20 MB each · multiple files supported
+          PDF, PNG, JPEG, Excel, or CSV · up to 20 MB each · multiple files supported
         </div>
         {atCapacity && (
           <div className="text-xs text-amber-600">

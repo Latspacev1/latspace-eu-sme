@@ -25,6 +25,8 @@ export interface ProposedDataPoint {
   source_file?: string;
   source_excerpt?: string;
   source_page?: number;
+  source_sheet?: string;
+  source_cell?: string;
   confidence?: number;
 }
 

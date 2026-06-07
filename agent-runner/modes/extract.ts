@@ -14,9 +14,19 @@ import {
 } from "../lib/agent/tools.ts";
 import { resolveRagFramework } from "../lib/agent/frameworkMap.ts";
 import { describeToolUse } from "../lib/agent/activity.ts";
+import { spreadsheetToText } from "../lib/spreadsheet/toText.ts";
 import type { ExtractJob, EmitFn } from "./types.ts";
 
 const IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/jpg", "image/webp", "image/gif"]);
+
+// Spreadsheet uploads can't be sent as a native document/image vision block, so
+// we serialize them to a coordinate-preserving text block instead (see
+// lib/spreadsheet/toText.ts).
+const SPREADSHEET_TYPES = new Set([
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  "application/vnd.ms-excel",
+  "text/csv",
+]);
 
 function normalizeMime(mime: string): string {
   return mime === "image/jpg" ? "image/jpeg" : mime;
@@ -31,26 +41,46 @@ export async function handleExtract(job: ExtractJob, emit: EmitFn): Promise<void
   const framework = resolveRagFramework(job.framework);
   const mime = normalizeMime(job.mimeType || "application/pdf");
 
-  // Fetch the document bytes from the short-TTL signed URL and base64-encode
-  // them for the content block. We never receive the service key — only the URL.
-  let base64: string;
+  // Fetch the document bytes from the short-TTL signed URL. We never receive the
+  // service key — only the URL. For PDFs/images we base64-encode the bytes into a
+  // native vision block; for spreadsheets we serialize to a text block instead
+  // (Claude vision blocks don't accept .xlsx/.csv), so base64 is skipped there.
+  let buf: Buffer;
   try {
     const res = await fetch(job.documentUrl);
     if (!res.ok) {
       emit("error", { message: `Failed to fetch document (${res.status})` });
       return;
     }
-    const buf = Buffer.from(await res.arrayBuffer());
-    base64 = buf.toString("base64");
+    buf = Buffer.from(await res.arrayBuffer());
   } catch (err) {
     emit("error", { message: `Could not download document: ${err instanceof Error ? err.message : String(err)}` });
     return;
   }
 
+  const isSpreadsheet = SPREADSHEET_TYPES.has(mime);
   const isImage = IMAGE_TYPES.has(mime);
-  const fileBlock = isImage
-    ? { type: "image" as const, source: { type: "base64" as const, media_type: mime, data: base64 } }
-    : { type: "document" as const, source: { type: "base64" as const, media_type: "application/pdf", data: base64 } };
+
+  let fileBlock:
+    | { type: "text"; text: string }
+    | { type: "image"; source: { type: "base64"; media_type: string; data: string } }
+    | { type: "document"; source: { type: "base64"; media_type: string; data: string } };
+
+  if (isSpreadsheet) {
+    try {
+      const sheetText = await spreadsheetToText(buf, mime, job.filename);
+      fileBlock = { type: "text" as const, text: sheetText };
+    } catch (err) {
+      emit("error", { message: `Could not read spreadsheet: ${err instanceof Error ? err.message : String(err)}` });
+      return;
+    }
+  } else if (isImage) {
+    const base64 = buf.toString("base64");
+    fileBlock = { type: "image" as const, source: { type: "base64" as const, media_type: mime, data: base64 } };
+  } else {
+    const base64 = buf.toString("base64");
+    fileBlock = { type: "document" as const, source: { type: "base64" as const, media_type: "application/pdf", data: base64 } };
+  }
 
   const existingText =
     job.existingParameters && job.existingParameters.length
@@ -76,7 +106,11 @@ export async function handleExtract(job: ExtractJob, emit: EmitFn): Promise<void
 ${existingText}
 
 ${codingRules}
-
+${
+  isSpreadsheet
+    ? `\nThis document is a spreadsheet, serialized as text tables. Each table is headed "## Sheet: <name>"; the first column is the real spreadsheet row number and the "| row | A | B | C | ..." header gives the column letters. On every data point set source_sheet to the sheet name and source_cell to the exact cell or range you read the value from (e.g. 'B4' or 'C4:N4'); quote the cell's text in source_excerpt.\n`
+    : ""
+}
 Read the whole document, then call propose_extraction exactly once with every quantitative metric you find. Use "${job.filename}" as the source_file on each data point.`;
 
   async function* once(): AsyncIterable<SDKUserMessage> {

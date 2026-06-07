@@ -515,6 +515,11 @@ export function ProposalReview({
                       </td>
                       <td className="px-3 py-1.5">
                         <span className="block max-w-md text-xs italic text-slate-500">{d.source_excerpt || "—"}</span>
+                        {(d.source_sheet || d.source_cell) && (
+                          <span className="mt-0.5 block font-mono text-[11px] not-italic text-slate-400">
+                            {[d.source_sheet, d.source_cell].filter(Boolean).join(" · ")}
+                          </span>
+                        )}
                       </td>
                       <td className="px-3 py-1.5 text-slate-500">{d.source_page ?? "—"}</td>
                     </tr>

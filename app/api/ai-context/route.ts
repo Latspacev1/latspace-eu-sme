@@ -10,15 +10,25 @@ import { NextResponse } from "next/server";
 
 import { getSupabaseServiceClient } from "@/lib/supabase/server";
 import { resolveOrgId } from "@/lib/dashboard/auth";
+import { runChecklist } from "@/lib/ai/checklist";
 import {
   parseOnboardingProfile,
   emptyOnboardingProfile,
   normalizeStoredProfile,
   type OnboardingProfile,
 } from "@/lib/types/onboarding";
+import {
+  normalizeStoredChecklist,
+  normalizeChecklistSelection,
+  allChecklistItems,
+  type VsmeChecklist,
+} from "@/lib/types/checklist";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+// The PATCH handler regenerates the VSME checklist via an LLM call, which needs
+// more headroom than the default serverless timeout.
+export const maxDuration = 60;
 
 export async function GET(req: Request) {
   const orgId = await resolveOrgId(req);
@@ -68,12 +78,51 @@ export async function PATCH(req: Request) {
     return NextResponse.json({ error: parsed.error }, { status: 400 });
   }
 
+  const service = getSupabaseServiceClient();
+
+  // Read the existing profile once: we use its stored checklist as a fallback if
+  // regeneration fails, and its selections to carry the user's ticked items
+  // forward across the save.
+  const { data: existing } = await service
+    .from("organizations")
+    .select("onboarding_profile")
+    .eq("id", orgId)
+    .maybeSingle();
+  const existingProfile =
+    (existing?.onboarding_profile as Partial<OnboardingProfile> | null) ?? null;
+
+  // Regenerate the VSME data checklist (best-effort). If the LLM call fails
+  // (network/API key/etc.), keep whatever checklist was already stored so a
+  // transient error never wipes a previously-generated list.
+  let checklist: VsmeChecklist | undefined;
+  try {
+    checklist = await runChecklist({
+      companyName: parsed.profile.companyName,
+      businessContext: parsed.profile.businessContext,
+      vsmeModules: parsed.profile.vsme?.modules,
+    });
+  } catch (err) {
+    console.error("Checklist generation failed; preserving stored checklist", err);
+    checklist = existingProfile?.checklist
+      ? normalizeStoredChecklist(existingProfile.checklist)
+      : undefined;
+  }
+
+  // Carry the user's selections forward, pruned to items that still exist in the
+  // (possibly regenerated) checklist — surviving items stay ticked, removed ones
+  // drop off.
+  const checklistSelected = normalizeChecklistSelection(
+    existingProfile?.checklistSelected,
+    allChecklistItems(checklist),
+  );
+
   const profile: OnboardingProfile = {
     ...parsed.profile,
     updatedAt: new Date().toISOString(),
+    checklist,
+    checklistSelected,
   };
 
-  const service = getSupabaseServiceClient();
   const { error } = await service
     .from("organizations")
     .update({ name: profile.companyName, onboarding_profile: profile })
