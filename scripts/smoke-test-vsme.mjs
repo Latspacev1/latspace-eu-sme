@@ -10,7 +10,8 @@ import { fileURLToPath } from "node:url";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(__dirname, "..");
 
-// Load .env.local so VOYAGE_API_KEY is available.
+// Load .env.local so OPENAI_API_KEY is available (used by the retriever's
+// query embeddings).
 for (const envFile of [".env.local", ".env"]) {
   const p = join(REPO_ROOT, envFile);
   if (!existsSync(p)) continue;

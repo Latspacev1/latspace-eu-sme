@@ -5,12 +5,9 @@
 // (runner.ts, package.json, lib/, modes/, data/, node_modules/) — no
 // wrapping directory.
 //
-// The Claude Agent SDK ships a ~250 MB native Linux x64 binary as an
-// optional dep. npm only installs the variant matching the build host's
-// platform. To produce a tarball that works inside Vercel Sandbox (Linux
-// x64) FROM A NON-LINUX HOST, we set npm_config_target_platform=linux and
-// npm_config_target_arch=x64 before the install, which forces npm to pick
-// the linux-x64 optional dep. (CI on ubuntu-latest gets this for free.)
+// The runner's dependencies (the OpenAI Agents SDK and the openai client) are
+// pure JavaScript with no native binaries, so a plain production install
+// resolves identically on any build host — no platform/arch coercion needed.
 //
 // Usage:
 //   node scripts/build-runner-tarball.mjs              # build only
@@ -20,7 +17,7 @@
 
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { cpSync, mkdtempSync, readFileSync, renameSync, rmSync, existsSync, statSync } from "node:fs";
+import { cpSync, mkdtempSync, readFileSync, renameSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -90,13 +87,11 @@ try {
     },
   });
 
-  // Step 2: install runner deps against staging copy. The --os/--cpu/--libc
-  // flags (npm 9+) force the optional-deps resolver to pick linux-x64 even
-  // when running on a non-Linux host — that's the only way to get the right
-  // native Claude Agent SDK binary into the tarball from a Mac/Windows dev.
-  // CI on ubuntu-latest doesn't strictly need these flags, but they're
-  // harmless there too.
-  console.log("Installing runner deps (forcing linux-x64 optional binaries)...");
+  // Step 2: install runner deps against staging copy. The OpenAI Agents SDK
+  // and the openai client are pure JavaScript with no native binaries, so —
+  // unlike the old Claude Agent SDK — no platform/arch flags are needed: a
+  // plain production install resolves identically on Linux, macOS, and Windows.
+  console.log("Installing runner deps...");
   run(
     "npm",
     [
@@ -105,28 +100,9 @@ try {
       "--no-fund",
       "--omit=dev",
       "--no-package-lock",
-      "--os=linux",
-      "--cpu=x64",
-      "--libc=glibc",
-      "--include=optional",
     ],
     stagingRunner
   );
-
-  // Sanity: confirm the linux-x64 binary actually got installed.
-  const linuxBinary = join(
-    stagingRunner,
-    "node_modules",
-    "@anthropic-ai",
-    "claude-agent-sdk-linux-x64",
-    "claude"
-  );
-  if (!existsSync(linuxBinary)) {
-    throw new Error(
-      `Expected linux-x64 binary at ${linuxBinary} but it's missing — npm did not pick the linux variant. Check npm_config_target_platform and the @anthropic-ai/claude-agent-sdk-linux-x64 optionalDependency.`
-    );
-  }
-  console.log(`Found linux-x64 binary at ${linuxBinary}`);
 
   // Step 3: tar it up. Contents are at the top level (no wrapping dir) so
   // the sandbox extracts them directly into /vercel/sandbox.

@@ -10,7 +10,7 @@
 // written here. Keep these two files in sync if you change either.
 //
 // Usage:
-//   VOYAGE_API_KEY=... node scripts/build-vsme-index.mjs
+//   OPENAI_API_KEY=... node scripts/build-vsme-index.mjs
 //
 // Optional env:
 //   VSME_PDF_PATH  — path to the source PDF (default: ./vsme_merged.pdf)
@@ -55,15 +55,15 @@ const PDF_PATH = process.env.VSME_PDF_PATH
 const OUT_DIR = join(REPO_ROOT, "agent-runner", "data", "rag", "vsme");
 const TARGET_TOKENS = Number(process.env.VSME_TARGET_TOKENS ?? 700);
 const OVERLAP_TOKENS = Number(process.env.VSME_OVERLAP_TOKENS ?? 80);
-const EMBED_MODEL = "voyage-3-large";
-const BATCH_SIZE = 8;
+const EMBED_MODEL = "text-embedding-3-large";
+const BATCH_SIZE = 64;
 
 if (!existsSync(PDF_PATH)) {
   console.error(`PDF not found at ${PDF_PATH}`);
   process.exit(1);
 }
-if (!DRY_RUN && !process.env.VOYAGE_API_KEY) {
-  console.error("VOYAGE_API_KEY env var is required (or pass --dry-run)");
+if (!DRY_RUN && !process.env.OPENAI_API_KEY) {
+  console.error("OPENAI_API_KEY env var is required (or pass --dry-run)");
   process.exit(1);
 }
 
@@ -423,9 +423,9 @@ for (const sec of leafSections) {
 console.log(`Built ${chunks.length} chunks (target ${TARGET_TOKENS} tokens each)`);
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 4. Embeddings. Call the Voyage API in batches, model = voyage-3-large,
-//    inputType = "document". 1024-dim vectors; matches the existing
-//    CBAM/CDP indexes so cosine fusion at query time is well-defined.
+// 4. Embeddings. Call the OpenAI embeddings API in batches, model =
+//    text-embedding-3-large (3072-dim). Matches the runtime retriever, which
+//    asserts vectors.json.model === this model before serving the index.
 // ─────────────────────────────────────────────────────────────────────────────
 
 if (DRY_RUN) {
@@ -444,13 +444,13 @@ if (DRY_RUN) {
   process.exit(0);
 }
 
-const { VoyageAIClient } = require("voyageai");
-const voyage = new VoyageAIClient({ apiKey: process.env.VOYAGE_API_KEY });
+const OpenAI = require("openai").default ?? require("openai");
+const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 /** @param {string} s @returns {string} */
 function sanitize(s) {
   let out = s.normalize("NFC");
-  // Strip lone surrogates and control bytes the Voyage API rejects.
+  // Strip lone surrogates and control bytes the embedding API rejects.
   out = out.replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, "�");
   // eslint-disable-next-line no-control-regex
   out = out.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "");
@@ -467,14 +467,13 @@ for (let i = 0; i < chunks.length; i += BATCH_SIZE) {
   // Up to 3 retries with linear backoff on transient errors.
   while (true) {
     try {
-      const resp = await voyage.embed({
+      const resp = await openai.embeddings.create({
         input,
         model: EMBED_MODEL,
-        inputType: "document",
       });
       const batchVecs = (resp.data ?? []).map((d) => d.embedding);
       if (batchVecs.length !== slice.length) {
-        throw new Error(`Voyage returned ${batchVecs.length} embeddings for batch of ${slice.length}`);
+        throw new Error(`OpenAI returned ${batchVecs.length} embeddings for batch of ${slice.length}`);
       }
       vectors.push(...batchVecs);
       break;

@@ -1,25 +1,22 @@
-// Fill mode handler. Mirrors extract.ts (same query options + NDJSON event
-// loop) but instead of a document it serialises the org's measured input
-// catalogue and the derivable VSME target cells into a text instruction. The
-// agent searches the VSME guidance for methodology, then authors formulas over
-// the input codes and calls the propose_fill MCP tool exactly once.
+// Fill mode handler. Runs the OpenAI Agents SDK agent with search_guidance +
+// propose_fill. It serialises the org's measured input catalogue and the
+// derivable VSME target cells into a text instruction; the agent searches the
+// VSME guidance for methodology, authors formulas over the input codes, and
+// calls propose_fill exactly once.
 //
 // The sandbox has NO database access — all inputs arrive in the job and the
 // proposal is committed app-side (lib/metrics/commitProposal.ts), same security
 // boundary as extract.
 
-import { query, type SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
-import type { MessageParam } from "@anthropic-ai/sdk/resources";
+import type { AgentInputItem } from "@openai/agents";
 import { getSystemPrompt } from "../lib/guidance.ts";
 import {
-  createAgentMcpServer,
-  toolSearchGuidance,
-  toolProposeFill,
+  createAgentTools,
   type FillProposal,
   type RetrievedSource,
 } from "../lib/agent/tools.ts";
 import { resolveRagFramework } from "../lib/agent/frameworkMap.ts";
-import { describeToolUse } from "../lib/agent/activity.ts";
+import { runAgentStreaming } from "./runAgent.ts";
 import type { FillJob, EmitFn } from "./types.ts";
 
 function formatInputs(job: FillJob): string {
@@ -65,18 +62,7 @@ ${formatTargets(job)}
 
 For every target you can derive from the INPUTS, search the guidance for its methodology, then author an output parameter (pinned to the target's vsme_cell) and a formula over the input codes. Skip targets whose inputs are missing. Call propose_fill exactly once when done.`;
 
-  async function* once(): AsyncIterable<SDKUserMessage> {
-    yield {
-      type: "user",
-      message: {
-        role: "user",
-        content: [{ type: "text", text: instruction }],
-      } as MessageParam,
-      parent_tool_use_id: null,
-    };
-  }
-
-  const abortController = new AbortController();
+  const input: AgentInputItem[] = [{ role: "user", content: instruction }];
 
   // Stream retrieved guidance sources to the client (same dedupe as chat).
   const seenSources = new Set<string>();
@@ -95,80 +81,29 @@ For every target you can derive from the INPUTS, search the guidance for its met
     proposal = p;
   };
 
-  const mcpServer = createAgentMcpServer(framework, { onSearchHit, onFill });
+  const tools = createAgentTools(framework, { onSearchHit, onFill });
 
-  const q = query({
-    prompt: once(),
-    options: {
-      model: "claude-opus-4-7",
-      systemPrompt: getSystemPrompt(framework, "fill", job.businessContext),
-      mcpServers: { [framework]: mcpServer },
-      allowedTools: [toolSearchGuidance(framework), toolProposeFill(framework)],
-      settingSources: [],
-      permissionMode: "bypassPermissions",
-      allowDangerouslySkipPermissions: true,
-      persistSession: false,
-      includePartialMessages: false,
+  try {
+    await runAgentStreaming({
+      model: "gpt-5",
+      instructions: getSystemPrompt(framework, "fill", job.businessContext),
+      tools,
+      input,
       // Deriving many VSME cells means a long chain of guidance lookups before
       // the single propose_fill call; give it ample turns.
       maxTurns: 24,
-      abortController,
-      env: { ...process.env, CLAUDE_AGENT_SDK_CLIENT_APP: `${framework}-fill/1.0` },
-    },
-  });
-
-  const seenBlockText = new Map<string, number>();
-  const seenToolUseIds = new Set<string>();
-  const toolErrorMessages: string[] = [];
-
-  try {
-    for await (const msg of q) {
-      if (msg.type === "assistant") {
-        const blocks = msg.message.content ?? [];
-        const acc: string[] = [];
-        for (const b of blocks) {
-          if (b.type === "text") {
-            acc.push(b.text);
-          } else if (b.type === "tool_use") {
-            if (!seenToolUseIds.has(b.id)) {
-              seenToolUseIds.add(b.id);
-              emit("activity", describeToolUse(b.name, b.input, framework));
-            }
-          }
-        }
-        const fullText = acc.join("");
-        const prev = seenBlockText.get(msg.uuid) ?? 0;
-        if (fullText.length > prev) {
-          const delta = fullText.slice(prev);
-          seenBlockText.set(msg.uuid, fullText.length);
-          if (delta) emit("text", { text: delta });
-        }
-      } else if (msg.type === "user" && msg.tool_use_result !== undefined) {
-        const r = msg.tool_use_result as
-          | { isError?: boolean; content?: Array<{ text?: string }> }
-          | undefined;
-        if (r?.isError) {
-          toolErrorMessages.push(r.content?.[0]?.text ?? "tool error");
-        }
-      } else if (msg.type === "result") {
-        if (msg.subtype !== "success") {
-          const errs = [...(msg.errors ?? []), ...toolErrorMessages];
-          emit("error", { message: errs.join(" | ") || msg.subtype });
-          return;
-        }
-        if (!proposal) {
-          emit("error", { message: "Model did not call propose_fill." });
-          return;
-        }
-        emit("proposal", proposal);
-        emit("done", {
-          stop_reason: msg.stop_reason,
-          usage: msg.usage,
-          cost_usd: msg.total_cost_usd,
-        });
-      }
-    }
-  } finally {
-    abortController.abort();
+      framework,
+      emit,
+    });
+  } catch (err) {
+    emit("error", { message: err instanceof Error ? err.message : String(err) });
+    return;
   }
+
+  if (!proposal) {
+    emit("error", { message: "Model did not call propose_fill." });
+    return;
+  }
+  emit("proposal", proposal);
+  emit("done", {});
 }

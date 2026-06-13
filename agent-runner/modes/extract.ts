@@ -1,26 +1,21 @@
-// Extract mode handler. Mirrors write.ts (same query options, same NDJSON event
-// loop) but instead of a report outline it attaches the uploaded document as a
-// native document/image content block so Claude can read both the text and the
-// page images (handles scanned bills with no separate OCR step), and it
-// registers the propose_extraction MCP tool instead of propose_insert.
+// Extract mode handler. Mirrors write.ts (same agent run + NDJSON event loop)
+// but instead of a report outline it attaches the uploaded document as a native
+// input_file / input_image content part so the model can read both the text and
+// the page images (handles scanned bills with no separate OCR step), and it
+// registers the propose_extraction tool instead of propose_insert.
 
-import { query, type SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
-import type { MessageParam } from "@anthropic-ai/sdk/resources";
+import type { AgentInputItem } from "@openai/agents";
 import { getSystemPrompt } from "../lib/guidance.ts";
-import {
-  createAgentMcpServer,
-  toolProposeExtraction,
-  type ExtractionProposal,
-} from "../lib/agent/tools.ts";
+import { createAgentTools, type ExtractionProposal } from "../lib/agent/tools.ts";
 import { resolveRagFramework } from "../lib/agent/frameworkMap.ts";
-import { describeToolUse } from "../lib/agent/activity.ts";
 import { spreadsheetToText } from "../lib/spreadsheet/toText.ts";
+import { runAgentStreaming } from "./runAgent.ts";
 import type { ExtractJob, EmitFn } from "./types.ts";
 
 const IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/jpg", "image/webp", "image/gif"]);
 
-// Spreadsheet uploads can't be sent as a native document/image vision block, so
-// we serialize them to a coordinate-preserving text block instead (see
+// Spreadsheet uploads can't be sent as a native input_file / input_image block,
+// so we serialize them to a coordinate-preserving text block instead (see
 // lib/spreadsheet/toText.ts).
 const SPREADSHEET_TYPES = new Set([
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -31,6 +26,13 @@ const SPREADSHEET_TYPES = new Set([
 function normalizeMime(mime: string): string {
   return mime === "image/jpg" ? "image/jpeg" : mime;
 }
+
+// One user-content part: an attached document/image, or serialized spreadsheet
+// text, following the OpenAI Responses input-content shapes.
+type FileBlock =
+  | { type: "input_text"; text: string }
+  | { type: "input_image"; image: string }
+  | { type: "input_file"; file: string; filename: string };
 
 export async function handleExtract(job: ExtractJob, emit: EmitFn): Promise<void> {
   if (!job.documentUrl) {
@@ -43,8 +45,7 @@ export async function handleExtract(job: ExtractJob, emit: EmitFn): Promise<void
 
   // Fetch the document bytes from the short-TTL signed URL. We never receive the
   // service key — only the URL. For PDFs/images we base64-encode the bytes into a
-  // native vision block; for spreadsheets we serialize to a text block instead
-  // (Claude vision blocks don't accept .xlsx/.csv), so base64 is skipped there.
+  // native vision block; for spreadsheets we serialize to a text block instead.
   let buf: Buffer;
   try {
     const res = await fetch(job.documentUrl);
@@ -61,25 +62,26 @@ export async function handleExtract(job: ExtractJob, emit: EmitFn): Promise<void
   const isSpreadsheet = SPREADSHEET_TYPES.has(mime);
   const isImage = IMAGE_TYPES.has(mime);
 
-  let fileBlock:
-    | { type: "text"; text: string }
-    | { type: "image"; source: { type: "base64"; media_type: string; data: string } }
-    | { type: "document"; source: { type: "base64"; media_type: string; data: string } };
+  let fileBlock: FileBlock;
 
   if (isSpreadsheet) {
     try {
       const sheetText = await spreadsheetToText(buf, mime, job.filename);
-      fileBlock = { type: "text" as const, text: sheetText };
+      fileBlock = { type: "input_text", text: sheetText };
     } catch (err) {
       emit("error", { message: `Could not read spreadsheet: ${err instanceof Error ? err.message : String(err)}` });
       return;
     }
   } else if (isImage) {
     const base64 = buf.toString("base64");
-    fileBlock = { type: "image" as const, source: { type: "base64" as const, media_type: mime, data: base64 } };
+    fileBlock = { type: "input_image", image: `data:${mime};base64,${base64}` };
   } else {
     const base64 = buf.toString("base64");
-    fileBlock = { type: "document" as const, source: { type: "base64" as const, media_type: "application/pdf", data: base64 } };
+    fileBlock = {
+      type: "input_file",
+      file: `data:application/pdf;base64,${base64}`,
+      filename: job.filename || "document.pdf",
+    };
   }
 
   const existingText =
@@ -113,96 +115,39 @@ ${
 }
 Read the whole document, then call propose_extraction exactly once with every quantitative metric you find. Use "${job.filename}" as the source_file on each data point.`;
 
-  async function* once(): AsyncIterable<SDKUserMessage> {
-    yield {
-      type: "user",
-      message: {
-        role: "user",
-        content: [fileBlock, { type: "text", text: instruction }],
-      } as MessageParam,
-      parent_tool_use_id: null,
-    };
-  }
-
-  const abortController = new AbortController();
+  const input: AgentInputItem[] = [
+    {
+      role: "user",
+      content: [fileBlock, { type: "input_text", text: instruction }],
+    },
+  ];
 
   let proposal: ExtractionProposal | null = null;
   const onExtraction = (p: ExtractionProposal) => {
     proposal = p;
   };
 
-  const mcpServer = createAgentMcpServer(framework, { onExtraction });
-
-  const q = query({
-    prompt: once(),
-    options: {
-      model: "claude-sonnet-4-5",
-      systemPrompt: getSystemPrompt(framework, "extract"),
-      mcpServers: { [framework]: mcpServer },
-      allowedTools: [toolProposeExtraction(framework)],
-      settingSources: [],
-      permissionMode: "bypassPermissions",
-      allowDangerouslySkipPermissions: true,
-      persistSession: false,
-      includePartialMessages: false,
-      maxTurns: 8,
-      abortController,
-      env: { ...process.env, CLAUDE_AGENT_SDK_CLIENT_APP: `${framework}-extract/1.0` },
-    },
-  });
-
-  const seenBlockText = new Map<string, number>();
-  const seenToolUseIds = new Set<string>();
-  const toolErrorMessages: string[] = [];
+  const tools = createAgentTools(framework, { onExtraction });
 
   try {
-    for await (const msg of q) {
-      if (msg.type === "assistant") {
-        const blocks = msg.message.content ?? [];
-        const acc: string[] = [];
-        for (const b of blocks) {
-          if (b.type === "text") {
-            acc.push(b.text);
-          } else if (b.type === "tool_use") {
-            if (!seenToolUseIds.has(b.id)) {
-              seenToolUseIds.add(b.id);
-              emit("activity", describeToolUse(b.name, b.input, framework));
-            }
-          }
-        }
-        const fullText = acc.join("");
-        const prev = seenBlockText.get(msg.uuid) ?? 0;
-        if (fullText.length > prev) {
-          const delta = fullText.slice(prev);
-          seenBlockText.set(msg.uuid, fullText.length);
-          if (delta) emit("text", { text: delta });
-        }
-      } else if (msg.type === "user" && msg.tool_use_result !== undefined) {
-        const r = msg.tool_use_result as
-          | { isError?: boolean; content?: Array<{ text?: string }> }
-          | undefined;
-        if (r?.isError) {
-          toolErrorMessages.push(r.content?.[0]?.text ?? "tool error");
-        }
-      } else if (msg.type === "result") {
-        if (msg.subtype !== "success") {
-          const errs = [...(msg.errors ?? []), ...toolErrorMessages];
-          emit("error", { message: errs.join(" | ") || msg.subtype });
-          return;
-        }
-        if (!proposal) {
-          emit("error", { message: "Model did not call propose_extraction." });
-          return;
-        }
-        emit("proposal", proposal);
-        emit("done", {
-          stop_reason: msg.stop_reason,
-          usage: msg.usage,
-          cost_usd: msg.total_cost_usd,
-        });
-      }
-    }
-  } finally {
-    abortController.abort();
+    await runAgentStreaming({
+      model: "gpt-4.1",
+      instructions: getSystemPrompt(framework, "extract"),
+      tools,
+      input,
+      maxTurns: 8,
+      framework,
+      emit,
+    });
+  } catch (err) {
+    emit("error", { message: err instanceof Error ? err.message : String(err) });
+    return;
   }
+
+  if (!proposal) {
+    emit("error", { message: "Model did not call propose_extraction." });
+    return;
+  }
+  emit("proposal", proposal);
+  emit("done", {});
 }

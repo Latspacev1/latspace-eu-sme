@@ -1,7 +1,7 @@
 // POST /api/dashboard/chat
 //
 // Stream-of-events endpoint for the AI Dashboard chat. Accepts the full
-// message history (the client owns the thread state), runs Claude with the
+// message history (the client owns the thread state), runs the model with the
 // `render_chart` tool, validates and hydrates any tool call, and streams
 // back a sequence of newline-delimited JSON events:
 //
@@ -13,9 +13,9 @@
 // We use ndjson rather than the SSE event format because the client doesn't
 // need named events and ndjson is trivial to parse incrementally.
 
-import type Anthropic from "@anthropic-ai/sdk";
+import type OpenAI from "openai";
 
-import { getAnthropicClient, DASHBOARD_MODEL } from "@/lib/ai/anthropic";
+import { getOpenAIClient, DASHBOARD_MODEL } from "@/lib/ai/openai";
 import { RENDER_CHART_TOOL } from "@/lib/ai/tools";
 import { loadCatalogue, catalogueToPrompt } from "@/lib/dashboard/catalogue";
 import { ChartSpecSchema } from "@/lib/dashboard/chart-spec";
@@ -77,49 +77,54 @@ export async function POST(req: Request) {
   const catalogue = await loadCatalogue(orgId);
   const cataloguePrompt = catalogueToPrompt(catalogue);
 
-  // Two system blocks so the heavy catalogue text benefits from prompt
-  // caching while the (rarely changing) instruction block also stays warm.
-  const systemBlocks: Anthropic.Messages.TextBlockParam[] = [
-    { type: "text", text: SYSTEM_BASE, cache_control: { type: "ephemeral" } },
-    { type: "text", text: cataloguePrompt, cache_control: { type: "ephemeral" } },
-  ];
+  // Static instructions + the heavy catalogue text. OpenAI caches stable prompt
+  // prefixes automatically, so no explicit cache-control directives are needed.
+  const instructions = `${SYSTEM_BASE}\n\n${cataloguePrompt}`;
 
-  const messages: Anthropic.Messages.MessageParam[] = body.messages.map(m => ({
+  const input: OpenAI.Responses.ResponseInput = body.messages.map(m => ({
     role: m.role,
     content: m.content,
   }));
 
   const enc = ndjsonEncoder();
-  const client = getAnthropicClient();
+  const client = getOpenAIClient();
 
   const stream = new ReadableStream({
     async start(controller) {
       const send = (obj: unknown) => controller.enqueue(enc(obj));
       try {
-        const result = await client.messages.stream({
+        const result = client.responses.stream({
           model: DASHBOARD_MODEL,
-          max_tokens: 1024,
-          system: systemBlocks,
+          max_output_tokens: 1024,
+          instructions,
           tools: [RENDER_CHART_TOOL],
-          tool_choice: { type: "auto" },
-          messages,
+          tool_choice: "auto",
+          input,
         });
 
         // Stream text deltas to the client as they arrive.
-        result.on("text", (delta) => {
-          if (delta) send({ type: "text", text: delta });
-        });
+        for await (const event of result) {
+          if (event.type === "response.output_text.delta" && event.delta) {
+            send({ type: "text", text: event.delta });
+          }
+        }
 
-        const final = await result.finalMessage();
+        const final = await result.finalResponse();
 
-        // Find a tool_use block (render_chart). If none, we already streamed
-        // the assistant's text reply — just close.
-        const toolUse = final.content.find(
-          (b): b is Anthropic.Messages.ToolUseBlock => b.type === "tool_use" && b.name === "render_chart",
-        );
+        // Find a render_chart tool call. If none, we already streamed the
+        // assistant's text reply — just close.
+        const toolCall = final.output.find(
+          (item) => item.type === "function_call" && item.name === "render_chart",
+        ) as OpenAI.Responses.ResponseFunctionToolCall | undefined;
 
-        if (toolUse) {
-          const parsed = ChartSpecSchema.safeParse(toolUse.input);
+        if (toolCall) {
+          let toolInput: unknown;
+          try {
+            toolInput = JSON.parse(toolCall.arguments);
+          } catch {
+            toolInput = null;
+          }
+          const parsed = ChartSpecSchema.safeParse(toolInput);
           if (!parsed.success) {
             send({
               type: "error",

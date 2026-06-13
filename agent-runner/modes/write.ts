@@ -1,21 +1,16 @@
-// Write mode handler. Mirrors the body of the previous Next route at
-// src/app/api/write/route.ts (pre-dispatcher refactor) one-for-one — same
-// agent options, same MCP server, same event types — except instead of
-// pushing to a ReadableStream we call emit() which writes one NDJSON line
-// per event to stdout.
+// Write mode handler. Runs the OpenAI Agents SDK agent with search_guidance +
+// propose_insert (and hosted web_search) and emits the drafted proposal once the
+// agent calls propose_insert. Streams text + activity events as NDJSON.
 
-import { query, type SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
-import type { MessageParam } from "@anthropic-ai/sdk/resources";
+import { webSearchTool, type AgentInputItem } from "@openai/agents";
 import { getSystemPrompt } from "../lib/guidance.ts";
 import {
-  createAgentMcpServer,
-  toolProposeInsert,
-  toolSearchGuidance,
+  createAgentTools,
   type ProposalBlocks,
   type RetrievedSource,
 } from "../lib/agent/tools.ts";
 import { resolveRagFramework } from "../lib/agent/frameworkMap.ts";
-import { describeToolUse } from "../lib/agent/activity.ts";
+import { runAgentStreaming } from "./runAgent.ts";
 import type { OutlineItem, WriteJob, EmitFn } from "./types.ts";
 
 function formatOutline(items: OutlineItem[]): string {
@@ -56,15 +51,8 @@ User instruction: ${job.instruction.trim()}
 
 Search the guidance for any regulatory facts you need, then call propose_insert exactly once with the drafted blocks.`;
 
-  async function* once(): AsyncIterable<SDKUserMessage> {
-    yield {
-      type: "user",
-      message: { role: "user", content: userText } as MessageParam,
-      parent_tool_use_id: null,
-    };
-  }
+  const input: AgentInputItem[] = [{ role: "user", content: userText }];
 
-  const abortController = new AbortController();
   const outlineIds = new Set(job.outline.map((it) => it.id));
   const allSources: RetrievedSource[] = [];
   const seen = new Set<string>();
@@ -87,98 +75,39 @@ Search the guidance for any regulatory facts you need, then call propose_insert 
     proposal = p;
   };
 
-  const mcpServer = createAgentMcpServer(framework, {
-    onSearchHit,
-    outlineIds,
-    onProposal,
-  });
-
-  const q = query({
-    prompt: once(),
-    options: {
-      model: "claude-opus-4-7",
-      systemPrompt: getSystemPrompt(framework, "write", job.businessContext),
-      mcpServers: { [framework]: mcpServer },
-      allowedTools: [
-        toolSearchGuidance(framework),
-        toolProposeInsert(framework),
-        "WebSearch",
-        "WebFetch",
-      ],
-      tools: ["WebSearch", "WebFetch"],
-      settingSources: [],
-      permissionMode: "bypassPermissions",
-      allowDangerouslySkipPermissions: true,
-      persistSession: false,
-      includePartialMessages: false,
-      // 16 turns. Write tasks sometimes do "search, refine, search
-      // again, cross-reference with a web source, then propose, then
-      // revise after a tool error" — that's already 6+ turns. Headroom
-      // matters here because a truncated proposal is worse than a
-      // chatty one. Drop to 4 on Hobby — see DEPLOY.md plan tuning.
-      maxTurns: 16,
-      abortController,
-      env: { ...process.env, CLAUDE_AGENT_SDK_CLIENT_APP: `${framework}-app/1.0` },
-    },
-  });
-
-  const seenBlockText = new Map<string, number>();
-  const seenToolUseIds = new Set<string>();
-  const toolErrorMessages: string[] = [];
+  const tools = [
+    ...createAgentTools(framework, { onSearchHit, outlineIds, onProposal }),
+    webSearchTool(),
+  ];
 
   try {
-    for await (const msg of q) {
-      if (msg.type === "assistant") {
-        const blocks = msg.message.content ?? [];
-        const acc: string[] = [];
-        for (const b of blocks) {
-          if (b.type === "text") {
-            acc.push(b.text);
-          } else if (b.type === "tool_use") {
-            if (!seenToolUseIds.has(b.id)) {
-              seenToolUseIds.add(b.id);
-              emit("activity", describeToolUse(b.name, b.input, framework));
-            }
-          }
-        }
-        const fullText = acc.join("");
-        const prev = seenBlockText.get(msg.uuid) ?? 0;
-        if (fullText.length > prev) {
-          const delta = fullText.slice(prev);
-          seenBlockText.set(msg.uuid, fullText.length);
-          if (delta) emit("text", { text: delta });
-        }
-      } else if (msg.type === "user" && msg.tool_use_result !== undefined) {
-        const r = msg.tool_use_result as
-          | { isError?: boolean; content?: Array<{ text?: string }> }
-          | undefined;
-        if (r?.isError) {
-          toolErrorMessages.push(r.content?.[0]?.text ?? "tool error");
-        }
-      } else if (msg.type === "result") {
-        if (msg.subtype !== "success") {
-          const errs = [...(msg.errors ?? []), ...toolErrorMessages];
-          emit("error", { message: errs.join(" | ") || msg.subtype });
-          return;
-        }
-        if (!proposal) {
-          emit("error", { message: "Model did not call propose_insert." });
-          return;
-        }
-        emit("proposal", {
-          after_block_id: (proposal as ProposalBlocks).after_block_id,
-          blocks: (proposal as ProposalBlocks).blocks,
-          rationale: (proposal as ProposalBlocks).rationale,
-          sources: allSources.map(({ section, title, pages }) => ({ section, title, pages })),
-        });
-        emit("done", {
-          stop_reason: msg.stop_reason,
-          usage: msg.usage,
-          cost_usd: msg.total_cost_usd,
-        });
-      }
-    }
-  } finally {
-    abortController.abort();
+    await runAgentStreaming({
+      model: "gpt-5",
+      instructions: getSystemPrompt(framework, "write", job.businessContext),
+      tools,
+      input,
+      // 16 turns. Write tasks sometimes do "search, refine, search again,
+      // cross-reference with a web source, then propose, then revise after a
+      // tool error" — that's already 6+ turns.
+      maxTurns: 16,
+      framework,
+      emit,
+    });
+  } catch (err) {
+    emit("error", { message: err instanceof Error ? err.message : String(err) });
+    return;
   }
+
+  if (!proposal) {
+    emit("error", { message: "Model did not call propose_insert." });
+    return;
+  }
+  const p = proposal as ProposalBlocks;
+  emit("proposal", {
+    after_block_id: p.after_block_id,
+    blocks: p.blocks,
+    rationale: p.rationale,
+    sources: allSources.map(({ section, title, pages }) => ({ section, title, pages })),
+  });
+  emit("done", {});
 }

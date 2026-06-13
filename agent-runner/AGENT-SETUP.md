@@ -1,6 +1,6 @@
 # Agent runner setup
 
-The VSME Narrative report (qualitative editor) uses a Claude Agent SDK runner hosted in
+The VSME Narrative report (qualitative editor) uses an OpenAI Agents SDK runner hosted in
 [Vercel Sandbox](https://vercel.com/docs/vercel-sandbox). The Next.js routes
 `/api/reporting/chat` and `/api/reporting/write` spawn a fresh sandbox per
 request and stream NDJSON back to the browser.
@@ -17,12 +17,11 @@ request and stream NDJSON back to the browser.
 
 | Variable | Where it's read |
 |---|---|
-| `ANTHROPIC_API_KEY` | `lib/dispatcher/sandbox.ts` — passed into the sandbox env |
-| `VOYAGE_API_KEY` | `lib/dispatcher/sandbox.ts` — passed into the sandbox env |
+| `OPENAI_API_KEY` | `lib/dispatcher/sandbox.ts` — passed into the sandbox env (used by the agent modes and the RAG query embeddings) |
 | `AGENT_RUNNER_TARBALL_URL` | `lib/dispatcher/sandbox.ts` — Sandbox.create() source |
 | `AGENT_RUNNER_SNAPSHOT_ID` | (optional) overrides tarball — faster cold start |
 
-⚠️ The keys are currently passed into the sandbox env directly (security
+⚠️ The key is currently passed into the sandbox env directly (security
 downgrade). See the SECURITY DOWNGRADE comment in
 [lib/dispatcher/sandbox.ts](../lib/dispatcher/sandbox.ts) for the recovery
 path once Vercel credential brokering is verified to work on this team.
@@ -54,7 +53,7 @@ npm run publish:runner  # build + upload to Vercel Blob
 
 ## Stubbing for local dev (no Vercel needed)
 
-If `ANTHROPIC_API_KEY` is missing, the dispatcher will throw at request time.
+If `OPENAI_API_KEY` is missing, the dispatcher will throw at request time.
 For local dev without a sandbox, comment out the `dispatchToSandbox` call in
 `app/api/reporting/chat/route.ts` and `app/api/reporting/write/route.ts` and
 return a stub NDJSON response.

@@ -3,7 +3,7 @@
 //
 // This does NOT persist anything: it returns the generated text so the user can
 // review and edit it on the AI Context page before saving via PATCH
-// /api/ai-context. Server-only: org scoping via resolveOrgId; the Anthropic key
+// /api/ai-context. Server-only: org scoping via resolveOrgId; the OpenAI key
 // never reaches the client.
 
 import { NextResponse } from "next/server";
@@ -41,7 +41,7 @@ export async function POST(req: Request) {
   const websiteUrl =
     typeof body.websiteUrl === "string" ? body.websiteUrl.trim() : "";
 
-  if (!process.env.ANTHROPIC_API_KEY) {
+  if (!process.env.OPENAI_API_KEY) {
     return NextResponse.json(
       { error: "Sculptor is not configured (missing API key)." },
       { status: 503 },

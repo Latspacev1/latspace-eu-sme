@@ -4,8 +4,8 @@
 //   1. Dispatcher route (on Vercel) creates a Sandbox, sets JOB_JSON in the
 //      sandbox env, and calls `node runner.ts` (via tsx).
 //   2. We parse JOB_JSON, dispatch to the chat or write handler.
-//   3. The handler runs `query(...)` from the Claude Agent SDK, which spawns
-//      the bundled CLI binary as a subprocess inside the sandbox.
+//   3. The handler runs the OpenAI Agents SDK (`run(agent, …, {stream:true})`),
+//      which drives the tool-calling loop against the OpenAI API.
 //   4. Each agent event (text delta, tool use, retrieved sources, proposal,
 //      done, error) is written to stdout as a single NDJSON line.
 //   5. The sandbox SDK's cmd.logs() forwards those lines to the dispatcher,
