@@ -131,7 +131,7 @@ Read the whole document, then call propose_extraction exactly once with every qu
 
   try {
     await runAgentStreaming({
-      model: "gpt-4.1",
+      model: "gpt-5.4-mini",
       instructions: getSystemPrompt(framework, "extract"),
       tools,
       input,
