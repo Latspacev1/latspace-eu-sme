@@ -8,16 +8,12 @@
     "start": "node --experimental-strip-types --no-warnings runner.ts"
   },
   "dependencies": {
-    "@anthropic-ai/claude-agent-sdk": "^0.2.132",
-    "@anthropic-ai/sdk": "^0.93.0",
-    "voyageai": "^0.2.1",
+    "@openai/agents": "^0.11.6",
+    "openai": "^6.42.0",
     "zod": "^4.4.3"
   },
   "devDependencies": {
     "@types/node": "^20",
     "typescript": "^5"
-  },
-  "optionalDependencies": {
-    "@anthropic-ai/claude-agent-sdk-linux-x64": "^0.2.132"
   }
 }

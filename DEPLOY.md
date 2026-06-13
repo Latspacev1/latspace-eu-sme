@@ -21,8 +21,8 @@ Next.js route on Vercel  ── runtime "nodejs", maxDuration 800 ──┐
   ▼                                                              │
 Vercel Sandbox (ephemeral Linux x64 VM, 2 vCPU)                  │
   │  • boots, fetches AGENT_RUNNER_TARBALL_URL from Vercel Blob  │
-  │  • runs `node runner.ts` (Claude Agent SDK + native binary)  │
-  │  • firewall: egress allowed ONLY to anthropic/voyage/        │
+  │  • runs `node runner.ts` (OpenAI Agents SDK, pure JS)        │
+  │  • firewall: egress allowed ONLY to openai/                  │
   │    supabase/blob hosts                                       │
   ▼                                                              │
 stdout NDJSON  ─────────────────────────────────────────────────┘
@@ -93,27 +93,26 @@ NEXT_PUBLIC_CLERK_SIGN_IN_FALLBACK_REDIRECT_URL=/post-auth
 NEXT_PUBLIC_CLERK_SIGN_UP_FALLBACK_REDIRECT_URL=/post-auth
 ```
 
-### 1c. Anthropic + Voyage (the AI)
+### 1c. OpenAI (the AI)
 
-- **Anthropic**: create an API key at the Anthropic console. Used by the agent
-  (inside the sandbox) and by `/api/dashboard/chat`.
-- **Voyage**: create an API key at voyageai.com. Used by the RAG retriever for
-  query embeddings.
+- **OpenAI**: create an API key at the OpenAI platform console. Used by the agent
+  (inside the sandbox), by the in-process AI routes (`/api/dashboard/chat`,
+  checklist, Sculptor), and by the RAG retriever for query embeddings
+  (`text-embedding-3-large`).
 
 Collect:
 ```
-ANTHROPIC_API_KEY
-VOYAGE_API_KEY
+OPENAI_API_KEY
 ```
 
 ---
 
 ## Step 2 — Build and publish the agent-runner tarball
 
-The sandbox fetches this tarball on boot. It contains `runner.ts`, the runner's
-`node_modules`, and the **~250 MB native Claude Agent SDK Linux x64 binary**.
-The build script forces the linux-x64 optional dependency so it works even when
-you build from Windows/macOS.
+The sandbox fetches this tarball on boot. It contains `runner.ts` and the
+runner's `node_modules`. The OpenAI Agents SDK is pure JavaScript (no native
+binary), so the tarball is small and the build resolves identically whether you
+build from Windows, macOS, or Linux.
 
 You need a **Vercel Blob store** and its read-write token:
 
@@ -132,8 +131,7 @@ npm run publish:runner
 ```
 
 This runs `scripts/build-runner-tarball.mjs --upload`. It will:
-- stage `agent-runner/`, install deps with `--os=linux --cpu=x64`,
-- verify the linux-x64 binary is present,
+- stage `agent-runner/`, install production deps,
 - produce `agent-runner-<sha>.tar.gz`,
 - upload it to Blob and print:
 
@@ -181,8 +179,7 @@ AGENT_DISPATCH_MODE=sandbox
 AGENT_RUNNER_TARBALL_URL=...
 
 # AI
-ANTHROPIC_API_KEY=...
-VOYAGE_API_KEY=...
+OPENAI_API_KEY=...
 
 # Clerk
 NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=...
@@ -261,20 +258,19 @@ change runner behavior and don't see it in prod, this is almost always why.
 `lib/dispatcher/sandbox.ts` is currently in an **intentional security
 downgrade** (see the `SECURITY DOWNGRADE` comment around line 57):
 
-- The original design **brokered** the Anthropic/Voyage keys at the network
-  layer, so the keys never entered the sandbox VM. Vercel rejected those
-  transform rules with HTTP 400 (credential brokering likely needs a
-  team-level permission that isn't enabled).
-- As a fallback, the keys are passed into the sandbox **env**. The firewall
-  still denies all egress except `api.anthropic.com`, `api.voyageai.com`,
-  `*.supabase.co`, and `*.public.blob.vercel-storage.com`, so the blast radius
-  is limited — but a prompt-injection that gets the model to print `env` could
-  leak the keys.
+- The original design **brokered** the OpenAI key at the network layer, so the
+  key never entered the sandbox VM. Vercel rejected those transform rules with
+  HTTP 400 (credential brokering likely needs a team-level permission that
+  isn't enabled).
+- As a fallback, the key is passed into the sandbox **env**. The firewall still
+  denies all egress except `api.openai.com`, `*.supabase.co`, and
+  `*.public.blob.vercel-storage.com`, so the blast radius is limited — but a
+  prompt-injection that gets the model to print `env` could leak the key.
 
 This is acceptable for launch given the locked-down egress. To restore the
 stronger boundary: open a Vercel support ticket to enable credential brokering
-(or move to `@vercel/sandbox@beta`), then re-add the `transform` rules and
-remove the two keys from the `env` object in `dispatchToSandbox`.
+(or move to `@vercel/sandbox@beta`), then re-add the `transform` rule and
+remove the key from the `env` object in `dispatchToSandbox`.
 
 ---
 

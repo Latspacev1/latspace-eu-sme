@@ -9,18 +9,14 @@
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { createRequire } from "node:module";
-
-// Voyage's ESM build does directory imports (e.g. `from "./api"` instead of
-// `from "./api/index.js"`) which Node's native ESM resolver rejects with
-// ERR_UNSUPPORTED_DIR_IMPORT. The CJS entry doesn't have this problem, so
-// we force CJS via createRequire — same pattern scripts/build-index.mjs
-// uses for the same reason.
-const require = createRequire(import.meta.url);
-const { VoyageAIClient } = require("voyageai") as typeof import("voyageai");
-type VoyageAIClient = InstanceType<typeof VoyageAIClient>;
+import OpenAI from "openai";
 
 export type Framework = "cdp" | "vsme";
+
+// The embedding model the index is built with. Query embeddings MUST use the
+// same model — mixing embedding spaces silently wrecks retrieval. We assert the
+// loaded index's `model` matches this at load time (fail fast on a stale index).
+const EMBED_MODEL = "text-embedding-3-large";
 
 const INDEX_DIR = (framework: Framework) => join(process.cwd(), "data", "rag", framework);
 
@@ -57,19 +53,19 @@ interface LoadedIndex {
   chunks: Chunk[];
   vectors: number[][];
   bm25: Bm25Index;
-  voyage: VoyageAIClient;
+  openai: OpenAI;
 }
 
 const indexCache = new Map<Framework, LoadedIndex>();
-let voyageClient: VoyageAIClient | null = null;
+let openaiClient: OpenAI | null = null;
 
-function getVoyage(): VoyageAIClient {
-  if (voyageClient) return voyageClient;
-  if (!process.env.VOYAGE_API_KEY) {
-    throw new Error("VOYAGE_API_KEY is not set");
+function getOpenAI(): OpenAI {
+  if (openaiClient) return openaiClient;
+  if (!process.env.OPENAI_API_KEY) {
+    throw new Error("OPENAI_API_KEY is not set");
   }
-  voyageClient = new VoyageAIClient({ apiKey: process.env.VOYAGE_API_KEY });
-  return voyageClient;
+  openaiClient = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+  return openaiClient;
 }
 
 function loadIndex(framework: Framework): LoadedIndex {
@@ -78,17 +74,26 @@ function loadIndex(framework: Framework): LoadedIndex {
   const dir = INDEX_DIR(framework);
   const chunks = JSON.parse(readFileSync(join(dir, "chunks.json"), "utf8")) as Chunk[];
   const vectorsFile = JSON.parse(readFileSync(join(dir, "vectors.json"), "utf8")) as VectorsFile;
+  // Fail fast on a stale index built with a different embedding model — querying
+  // an OpenAI query vector against Voyage document vectors returns garbage.
+  if (vectorsFile.model !== EMBED_MODEL) {
+    throw new Error(
+      `RAG index for "${framework}" was built with "${vectorsFile.model}" but the ` +
+        `retriever embeds queries with "${EMBED_MODEL}". Rebuild the index ` +
+        `(scripts/reembed-rag-index.mjs).`,
+    );
+  }
   const loaded: LoadedIndex = {
     chunks,
     vectors: vectorsFile.vectors,
     bm25: vectorsFile.bm25,
-    voyage: getVoyage(),
+    openai: getOpenAI(),
   };
   indexCache.set(framework, loaded);
   return loaded;
 }
 
-// Cosine similarity between unit-norm-ish vectors. Voyage already returns
+// Cosine similarity between unit-norm-ish vectors. OpenAI already returns
 // L2-normalized vectors so cosine reduces to dot product, but we normalize
 // defensively in case that changes.
 function cosine(a: number[], b: number[]): number {
@@ -134,8 +139,8 @@ function tokenize(text: string): string[] {
     .filter((t) => t.length > 1 && !STOP_WORDS.has(t));
 }
 
-// Defensive UTF-8 sanitizer — Voyage rejects lone surrogates and certain
-// control bytes with a 400. Mirrors the sanitizer in scripts/build-index.mjs.
+// Defensive UTF-8 sanitizer — embedding APIs reject lone surrogates and certain
+// control bytes with a 400. Mirrors the sanitizer in the re-embed script.
 function sanitizeQuery(s: string): string {
   let out = s.normalize("NFC");
   out = out.replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, "�");
@@ -144,14 +149,13 @@ function sanitizeQuery(s: string): string {
   return out.trim();
 }
 
-async function embedQuery(voyage: VoyageAIClient, query: string): Promise<number[]> {
-  const resp = await voyage.embed({
+async function embedQuery(openai: OpenAI, query: string): Promise<number[]> {
+  const resp = await openai.embeddings.create({
     input: sanitizeQuery(query),
-    model: "voyage-3-large",
-    inputType: "query",
+    model: EMBED_MODEL,
   });
   const vec = resp.data?.[0]?.embedding;
-  if (!vec) throw new Error("Voyage returned no embedding for query");
+  if (!vec) throw new Error("OpenAI returned no embedding for query");
   return vec;
 }
 
@@ -191,11 +195,11 @@ export async function search(
   options: SearchOptions = {}
 ): Promise<RetrievedChunk[]> {
   const { k = 5, candidatesPerRetriever = 20 } = options;
-  const { chunks, vectors, bm25, voyage } = loadIndex(framework);
+  const { chunks, vectors, bm25, openai } = loadIndex(framework);
 
   // Run dense + sparse in parallel.
   const [queryVec, sparseTokens] = await Promise.all([
-    embedQuery(voyage, query),
+    embedQuery(openai, query),
     Promise.resolve(tokenize(query)),
   ]);
 

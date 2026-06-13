@@ -25,18 +25,15 @@ function errorResponse(message: string, status = 500): Response {
 }
 
 export async function dispatchLocal(opts: DispatchOptions): Promise<Response> {
-  const anthropicKey = process.env.ANTHROPIC_API_KEY;
-  const voyageKey = process.env.VOYAGE_API_KEY;
-  if (!anthropicKey) return errorResponse("ANTHROPIC_API_KEY is not set in .env.local");
-  if (!voyageKey) return errorResponse("VOYAGE_API_KEY is not set in .env.local");
+  const openaiKey = process.env.OPENAI_API_KEY;
+  if (!openaiKey) return errorResponse("OPENAI_API_KEY is not set in .env.local");
 
   const runnerCwd = path.join(process.cwd(), "agent-runner");
   const env: NodeJS.ProcessEnv = {
     ...process.env,
     NODE_ENV: process.env.NODE_ENV ?? "development",
     JOB_JSON: JSON.stringify(opts.job),
-    ANTHROPIC_API_KEY: anthropicKey,
-    VOYAGE_API_KEY: voyageKey,
+    OPENAI_API_KEY: openaiKey,
   };
 
   // Node's --experimental-strip-types lets us run .ts directly without tsx.

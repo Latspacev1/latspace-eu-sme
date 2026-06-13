@@ -5,22 +5,19 @@
 //
 // Unlike Sculptor (which researches the web), this is a single-shot synthesis
 // grounded in the company name and its already-generated business context. It
-// uses Claude with a FORCED tool (`emit_checklist`) so the output is structured
-// JSON we can persist directly, rather than prose we'd have to parse.
+// uses the OpenAI Responses API with a structured-output JSON schema so the
+// result is structured JSON we can persist directly, rather than prose we'd
+// have to parse.
 
-import type Anthropic from "@anthropic-ai/sdk";
-
-import { getAnthropicClient } from "@/lib/ai/anthropic";
+import { getOpenAIClient } from "@/lib/ai/openai";
 import {
   normalizeStoredChecklist,
   type VsmeChecklist,
 } from "@/lib/types/checklist";
 
-// Opus is reserved elsewhere for reasoning-heavy work; for the checklist we want
-// reliable structured synthesis of well-known VSME data points, so Sonnet 4.6 is
-// the right balance of quality and latency. The forced tool does the heavy
-// lifting of shaping the output.
-const CHECKLIST_MODEL = "claude-sonnet-4-6";
+// gpt-4.1 gives reliable structured synthesis of well-known VSME data points at
+// good latency; the JSON schema does the heavy lifting of shaping the output.
+const CHECKLIST_MODEL = "gpt-4.1";
 
 const SYSTEM_PROMPT = [
   "You are a VSME (EFRAG Voluntary Sustainability Reporting Standard for SMEs) reporting expert.",
@@ -32,25 +29,21 @@ const SYSTEM_PROMPT = [
   "- No numbering, no bullets, no prose, no explanations — just the title of the data point or document.",
   "- Be specific and practical: name the actual figures, records, and documents an SME would have to gather.",
   "- Cover each category thoroughly but do not pad with duplicates or irrelevant items.",
-  "- Call the emit_checklist tool exactly once with the four arrays.",
+  "- Return the four arrays via the structured output schema.",
 ].join("\n");
 
-/** The forced tool — its schema is the checklist shape we want back as JSON. */
-const emitChecklistTool: Anthropic.Messages.Tool = {
-  name: "emit_checklist",
-  description:
-    "Emit the VSME data checklist: the data points / documents to collect, grouped into the four categories.",
-  input_schema: {
-    type: "object",
-    properties: {
-      environmental: { type: "array", items: { type: "string" } },
-      social: { type: "array", items: { type: "string" } },
-      governance: { type: "array", items: { type: "string" } },
-      general: { type: "array", items: { type: "string" } },
-    },
-    required: ["environmental", "social", "governance", "general"],
+// The structured-output schema is the checklist shape we want back as JSON.
+const CHECKLIST_JSON_SCHEMA = {
+  type: "object",
+  properties: {
+    environmental: { type: "array", items: { type: "string" } },
+    social: { type: "array", items: { type: "string" } },
+    governance: { type: "array", items: { type: "string" } },
+    general: { type: "array", items: { type: "string" } },
   },
-};
+  required: ["environmental", "social", "governance", "general"],
+  additionalProperties: false,
+} as const;
 
 export interface ChecklistInput {
   companyName: string;
@@ -59,12 +52,12 @@ export interface ChecklistInput {
 }
 
 /**
- * Run the checklist generator for a company. Throws on an Anthropic/network
- * error or if the model returns no tool output (callers treat this as
- * best-effort and continue without updating the stored checklist).
+ * Run the checklist generator for a company. Throws on an OpenAI/network error
+ * or if the model returns no usable output (callers treat this as best-effort
+ * and continue without updating the stored checklist).
  */
 export async function runChecklist(input: ChecklistInput): Promise<VsmeChecklist> {
-  const client = getAnthropicClient();
+  const client = getOpenAIClient();
 
   const scopeLine =
     input.vsmeModules === "basic_comprehensive"
@@ -83,36 +76,37 @@ export async function runChecklist(input: ChecklistInput): Promise<VsmeChecklist
       : []),
   ].join("\n");
 
-  const message = await client.messages.create({
+  const response = await client.responses.create({
     model: CHECKLIST_MODEL,
-    max_tokens: 2048,
-    // Single cached system block — the instructions are static across calls.
-    system: [
-      {
-        type: "text",
-        text: SYSTEM_PROMPT,
-        cache_control: { type: "ephemeral" },
+    max_output_tokens: 2048,
+    instructions: SYSTEM_PROMPT,
+    input: [{ role: "user", content: userPrompt }],
+    text: {
+      format: {
+        type: "json_schema",
+        name: "vsme_checklist",
+        schema: CHECKLIST_JSON_SCHEMA,
+        strict: true,
       },
-    ],
-    tools: [emitChecklistTool],
-    tool_choice: { type: "tool", name: "emit_checklist" },
-    messages: [{ role: "user", content: userPrompt }],
+    },
   });
 
-  // The SDK content blocks are a union; find the forced tool's call narrowly.
-  const toolUse = message.content.find(
-    (block): block is Anthropic.Messages.ToolUseBlock =>
-      block.type === "tool_use" && block.name === "emit_checklist",
-  );
-
-  if (!toolUse) {
+  const text = response.output_text;
+  if (!text) {
     throw new Error("Checklist generation produced no output.");
   }
 
-  // normalizeStoredChecklist would read generatedAt from the tool input (the
+  let parsed: Partial<VsmeChecklist>;
+  try {
+    parsed = JSON.parse(text) as Partial<VsmeChecklist>;
+  } catch {
+    throw new Error("Checklist generation returned malformed output.");
+  }
+
+  // normalizeStoredChecklist would read generatedAt from the model output (the
   // model doesn't emit one), so stamp it ourselves.
   return {
-    ...normalizeStoredChecklist(toolUse.input as Partial<VsmeChecklist>),
+    ...normalizeStoredChecklist(parsed),
     generatedAt: new Date().toISOString(),
   };
 }

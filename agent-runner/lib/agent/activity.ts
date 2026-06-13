@@ -22,21 +22,22 @@ export function describeToolUse(
   const args = (input ?? {}) as Record<string, unknown>;
   const docName = framework === "cdp" ? "CDP guidance" : "VSME guidance";
 
-  // MCP tool names look like `mcp__<server>__<name>`.
-  if (toolName.endsWith("__search_guidance")) {
+  // OpenAI function-tool names are passed through verbatim (no MCP prefix).
+  if (toolName === "search_guidance") {
     const q = typeof args.query === "string" ? args.query : "";
     return { kind: "guidance", label: `Searching ${docName}`, detail: q || undefined };
   }
-  if (toolName.endsWith("__propose_insert")) {
+  if (toolName === "propose_insert") {
     return { kind: "propose", label: "Drafting insertion" };
   }
-  if (toolName.endsWith("__propose_extraction")) {
+  if (toolName === "propose_extraction") {
     return { kind: "propose", label: "Proposing extracted metrics" };
   }
-  if (toolName.endsWith("__propose_fill")) {
+  if (toolName === "propose_fill") {
     return { kind: "propose", label: "Proposing formulas & metrics" };
   }
-  if (toolName === "WebSearch") {
+  // Hosted web search tool surfaces as `web_search` / `web_search_call`.
+  if (toolName === "web_search" || toolName === "web_search_call" || toolName === "WebSearch") {
     const q = typeof args.query === "string" ? args.query : "";
     return { kind: "websearch", label: "Searching the web", detail: q || undefined };
   }

@@ -68,28 +68,27 @@ function buildCreateParams(timeout: number, env: Record<string, string>, network
 // properly, we fall back to a plain domain allow-list and pass the API
 // keys directly into the sandbox env (see dispatchToSandbox).
 //
-// The firewall still blocks all egress except these two hosts, so the
+// The firewall still blocks all egress except the allowed hosts, so the
 // blast radius if the agent misbehaves is limited to those endpoints —
-// but the keys do live in process.env inside the VM, which means a
-// prompt-injection that gets the model to print env could leak them.
+// but the key does live in process.env inside the VM, which means a
+// prompt-injection that gets the model to print env could leak it.
 //
 // To restore the original boundary later: re-add the `transform` shape
-// shown in the commented reference, AND remove ANTHROPIC_API_KEY /
-// VOYAGE_API_KEY from the env object in dispatchToSandbox().
+// shown in the commented reference, AND remove OPENAI_API_KEY from the
+// env object in dispatchToSandbox().
 //
 // Reference: the original (broken) shape was
 //   {
 //     allow: {
-//       "api.anthropic.com": [{ transform: [{ headers: { "x-api-key": anthropicKey } }] }],
-//       "api.voyageai.com":  [{ transform: [{ headers: { Authorization: `Bearer ${voyageKey}` } }] }],
+//       "api.openai.com": [{ transform: [{ headers: { Authorization: `Bearer ${openaiKey}` } }] }],
 //     },
 //   }
 function getNetworkPolicy() {
   return {
     allow: [
-      // Anthropic + Voyage are what the agent actually calls.
-      "api.anthropic.com",
-      "api.voyageai.com",
+      // OpenAI is what the agent (chat/write/extract/fill) and the RAG
+      // retriever's query embeddings actually call.
+      "api.openai.com",
       // The sandbox needs to fetch its source tarball from Vercel Blob
       // during boot. The firewall's User-defined mode denies all traffic
       // by default — *including DNS* — so we must explicitly allow the
@@ -124,21 +123,17 @@ function errorResponse(message: string, status = 500): Response {
 export async function dispatchToSandbox(opts: DispatchOptions): Promise<Response> {
   const timeout = opts.timeoutMs ?? 600_000;
 
-  // ⚠️ See SECURITY DOWNGRADE comment above getNetworkPolicy(). These keys
-  // are passed into the sandbox env temporarily because credential brokering
-  // is currently rejected by the Sandbox API with HTTP 400. Remove these
-  // two env entries (and the key reads) once the firewall transform rules
-  // work again.
-  const anthropicKey = process.env.ANTHROPIC_API_KEY;
-  const voyageKey = process.env.VOYAGE_API_KEY;
-  if (!anthropicKey) throw new Error("ANTHROPIC_API_KEY is not set");
-  if (!voyageKey) throw new Error("VOYAGE_API_KEY is not set");
+  // ⚠️ See SECURITY DOWNGRADE comment above getNetworkPolicy(). The key is
+  // passed into the sandbox env temporarily because credential brokering is
+  // currently rejected by the Sandbox API with HTTP 400. Remove this env entry
+  // (and the key read) once the firewall transform rules work again.
+  const openaiKey = process.env.OPENAI_API_KEY;
+  if (!openaiKey) throw new Error("OPENAI_API_KEY is not set");
 
   const env = {
     NODE_ENV: "production",
     JOB_JSON: JSON.stringify(opts.job),
-    ANTHROPIC_API_KEY: anthropicKey,
-    VOYAGE_API_KEY: voyageKey,
+    OPENAI_API_KEY: openaiKey,
   };
 
   let sandbox;
@@ -147,8 +142,8 @@ export async function dispatchToSandbox(opts: DispatchOptions): Promise<Response
     sandbox = await Sandbox.create(buildCreateParams(timeout, env, getNetworkPolicy()));
     // Use Node's native --experimental-strip-types instead of tsx. tsx's
     // ESM resolution shim was rewriting bare-module imports incorrectly,
-    // causing voyageai's package.exports to resolve to a non-existent
-    // .jsx file (ERR_MODULE_NOT_FOUND in production logs 2026-05-09).
+    // causing dependency package.exports to resolve to non-existent files
+    // (ERR_MODULE_NOT_FOUND in production logs 2026-05-09).
     // Native Node 22 strip-types just removes type annotations and lets
     // Node's standard resolver handle imports — which is exactly what we
     // want for our use case (no enums, no namespaces, no fancy TS).

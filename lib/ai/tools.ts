@@ -1,9 +1,10 @@
 // Tool definitions for the dashboard chat. We expose a single tool
 // (`render_chart`) — the model fills it out, the server validates and renders.
 
-import type Anthropic from "@anthropic-ai/sdk";
+import type OpenAI from "openai";
 
-export const RENDER_CHART_TOOL: Anthropic.Messages.Tool = {
+export const RENDER_CHART_TOOL: OpenAI.Responses.FunctionTool = {
+  type: "function",
   name: "render_chart",
   description:
     "Render a chart in the chat from the available reporting data. " +
@@ -11,7 +12,10 @@ export const RENDER_CHART_TOOL: Anthropic.Messages.Tool = {
     "or compare metrics. Pick parameter codes from the provided catalogue " +
     "exactly — do not invent codes. If you cannot find a suitable mapping, " +
     "do NOT call this tool; respond in plain text explaining why instead.",
-  input_schema: {
+  // `strict` is off because `options` is intentionally optional; OpenAI strict
+  // mode would require every property to appear in `required`.
+  strict: false,
+  parameters: {
     type: "object",
     properties: {
       kind: {

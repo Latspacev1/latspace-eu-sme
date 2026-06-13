@@ -1,19 +1,12 @@
-// Chat mode handler. Mirrors the body of the previous Next route at
-// src/app/api/chat/route.ts (pre-dispatcher refactor) one-for-one — same
-// agent options, same MCP server, same event types — except instead of
-// pushing to a ReadableStream we call emit() which writes one NDJSON line
-// per event to stdout.
+// Chat mode handler. Runs the OpenAI Agents SDK agent with the search_guidance
+// tool plus the hosted web_search tool, streaming text + activity events to
+// stdout as NDJSON via emit().
 
-import { query, type SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
-import type { MessageParam } from "@anthropic-ai/sdk/resources";
+import { webSearchTool, type AgentInputItem } from "@openai/agents";
 import { getSystemPrompt } from "../lib/guidance.ts";
-import {
-  createAgentMcpServer,
-  toolSearchGuidance,
-  type RetrievedSource,
-} from "../lib/agent/tools.ts";
+import { createAgentTools, type RetrievedSource } from "../lib/agent/tools.ts";
 import { resolveRagFramework } from "../lib/agent/frameworkMap.ts";
-import { describeToolUse } from "../lib/agent/activity.ts";
+import { runAgentStreaming } from "./runAgent.ts";
 import type { ChatJob, ChatContext, ChatMessage, EmitFn } from "./types.ts";
 
 function formatContext(ctx: ChatContext): string {
@@ -53,39 +46,30 @@ function formatContext(ctx: ChatContext): string {
   ].join("\n");
 }
 
-// The streaming-input prompt only accepts user messages. To preserve prior
-// assistant context across our stateless invocation, we fold each assistant
-// turn into the *next* user turn as a bracketed note. This wastes some
-// tokens vs. resuming a session, but keeps the runner stateless. The optional
-// `context` argument is injected into the *final* user message only — older
-// turns get no context, since stale context would confuse the model.
-async function* historyAsPrompt(
+// The Responses input format carries assistant turns natively, so unlike the
+// Claude Agent SDK port we no longer fold them into the next user message. The
+// optional `context` argument is injected into the *final* user message only,
+// since stale context on older turns would confuse the model.
+function historyAsInput(
   messages: ChatMessage[],
   context: ChatContext | null | undefined
-): AsyncIterable<SDKUserMessage> {
-  let pendingAssistant: string | null = null;
+): AgentInputItem[] {
   const lastUserIdx = messages.map((m) => m.role).lastIndexOf("user");
+  const items: AgentInputItem[] = [];
   for (let i = 0; i < messages.length; i++) {
     const m = messages[i];
     if (m.role === "assistant") {
-      pendingAssistant = m.content;
+      items.push({ role: "assistant", content: m.content });
       continue;
     }
     const parts: string[] = [];
     if (i === lastUserIdx && context) {
       parts.push(`<context>\n${formatContext(context)}\n</context>`);
     }
-    if (pendingAssistant) {
-      parts.push(`[Earlier in this conversation, you replied: ${pendingAssistant}]`);
-    }
     parts.push(m.content);
-    pendingAssistant = null;
-    yield {
-      type: "user",
-      message: { role: "user", content: parts.join("\n\n") } as MessageParam,
-      parent_tool_use_id: null,
-    };
+    items.push({ role: "user", content: parts.join("\n\n") });
   }
+  return items;
 }
 
 export async function handleChat(job: ChatJob, emit: EmitFn): Promise<void> {
@@ -100,7 +84,6 @@ export async function handleChat(job: ChatJob, emit: EmitFn): Promise<void> {
   }
 
   const framework = resolveRagFramework(job.framework);
-  const abortController = new AbortController();
 
   // Source dedupe across multiple search_guidance calls in one turn.
   // Section+pages identifies a chunk well enough for UI purposes.
@@ -115,83 +98,23 @@ export async function handleChat(job: ChatJob, emit: EmitFn): Promise<void> {
     if (fresh.length) emit("retrieved", fresh);
   };
 
-  const mcpServer = createAgentMcpServer(framework, { onSearchHit });
-
-  const q = query({
-    prompt: historyAsPrompt(job.messages, job.context ?? null),
-    options: {
-      model: "claude-opus-4-7",
-      systemPrompt: getSystemPrompt(framework, "chat", job.businessContext),
-      mcpServers: { [framework]: mcpServer },
-      allowedTools: [toolSearchGuidance(framework), "WebSearch", "WebFetch"],
-      tools: ["WebSearch", "WebFetch"],
-      settingSources: [],
-      permissionMode: "bypassPermissions",
-      allowDangerouslySkipPermissions: true,
-      persistSession: false,
-      includePartialMessages: false,
-      // 16 turns. Compound regulatory questions sometimes need a long
-      // chain — search guidance, refine query, cross-reference an
-      // external standard via WebSearch, fetch a specific page, then
-      // synthesize. Pro's 800 s function ceiling gives us plenty of
-      // wall time for this; the bigger risk at high turn counts is
-      // tokens, not seconds. Drop to 4 on Hobby — see DEPLOY.md plan
-      // tuning.
-      maxTurns: 16,
-      abortController,
-      env: { ...process.env, CLAUDE_AGENT_SDK_CLIENT_APP: `${framework}-app/1.0` },
-    },
-  });
-
-  const seenBlockText = new Map<string, number>();
-  const seenToolUseIds = new Set<string>();
-  const toolErrorMessages: string[] = [];
+  const tools = [...createAgentTools(framework, { onSearchHit }), webSearchTool()];
 
   try {
-    for await (const msg of q) {
-      if (msg.type === "assistant") {
-        const blocks = msg.message.content ?? [];
-        const acc: string[] = [];
-        for (const b of blocks) {
-          if (b.type === "text") {
-            acc.push(b.text);
-          } else if (b.type === "tool_use") {
-            if (!seenToolUseIds.has(b.id)) {
-              seenToolUseIds.add(b.id);
-              emit("activity", describeToolUse(b.name, b.input, framework));
-            }
-          }
-        }
-        const fullText = acc.join("");
-        const prev = seenBlockText.get(msg.uuid) ?? 0;
-        if (fullText.length > prev) {
-          const delta = fullText.slice(prev);
-          seenBlockText.set(msg.uuid, fullText.length);
-          if (delta) emit("text", { text: delta });
-        }
-      } else if (msg.type === "user" && msg.tool_use_result !== undefined) {
-        const r = msg.tool_use_result as
-          | { isError?: boolean; content?: Array<{ text?: string }> }
-          | undefined;
-        if (r?.isError) {
-          const t = r.content?.[0]?.text ?? "tool error";
-          toolErrorMessages.push(t);
-        }
-      } else if (msg.type === "result") {
-        if (msg.subtype === "success") {
-          emit("done", {
-            stop_reason: msg.stop_reason,
-            usage: msg.usage,
-            cost_usd: msg.total_cost_usd,
-          });
-        } else {
-          const errs = [...(msg.errors ?? []), ...toolErrorMessages];
-          const message = errs.join(" | ") || msg.subtype;
-          emit("error", { message });
-        }
-      }
-    }
-  } finally {
-    abortController.abort();
+    await runAgentStreaming({
+      model: "gpt-5",
+      instructions: getSystemPrompt(framework, "chat", job.businessContext),
+      tools,
+      input: historyAsInput(job.messages, job.context ?? null),
+      // 16 turns. Compound regulatory questions sometimes need a long chain —
+      // search guidance, refine query, cross-reference an external standard via
+      // web search, then synthesize.
+      maxTurns: 16,
+      framework,
+      emit,
+    });
+    emit("done", {});
+  } catch (err) {
+    emit("error", { message: err instanceof Error ? err.message : String(err) });
   }
 }
